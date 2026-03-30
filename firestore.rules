@@ -1,0 +1,307 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - uid: string (required, immutable)
+//   - email: string (required, immutable)
+//   - displayName: string (optional)
+//   - role: string (required, enum: admin, manager, technician, viewer)
+//   - companyId: string (required, immutable)
+//   - createdAt: timestamp (required, immutable)
+//
+// Collection: companies
+// Document ID: {companyId}
+// Fields:
+//   - name: string (required)
+//   - siren: string (required)
+//   - createdAt: timestamp (required, immutable)
+//
+// Collection: companies/{companyId}/sites
+// Document ID: {siteId}
+// Fields:
+//   - name: string (required)
+//   - siret: string (required)
+//   - type: string (required, enum: ERP, ERT)
+//   - category: string (optional)
+//   - address: string (optional)
+//   - createdAt: timestamp (required, immutable)
+//
+// Collection: companies/{companyId}/sites/{siteId}/equipments
+// Document ID: {equipmentId}
+// Fields:
+//   - name: string (required)
+//   - type: string (required)
+//   - status: string (required, enum: OK, MAINTENANCE, HS)
+//   - brand: string (optional)
+//   - model: string (optional)
+//   - serialNumber: string (optional)
+//   - location: string (optional)
+//   - installationDate: timestamp (optional)
+//   - createdAt: timestamp (required, immutable)
+//
+// Collection: companies/{companyId}/sites/{siteId}/equipments/{equipmentId}/interventions
+// Document ID: {interventionId}
+// Fields:
+//   - date: timestamp (required)
+//   - type: string (required)
+//   - technicianName: string (required)
+//   - providerName: string (required)
+//   - status: string (required)
+//   - notes: string (optional)
+//   - createdAt: timestamp (required, immutable)
+//
+// Collection: companies/{companyId}/sites/{siteId}/anomalies
+// Document ID: {anomalyId}
+// Fields:
+//   - equipmentId: string (optional)
+//   - description: string (required)
+//   - severity: string (required, enum: observation, danger)
+//   - status: string (required, enum: open, resolved)
+//   - reportedBy: string (required)
+//   - date: timestamp (required)
+//   - createdAt: timestamp (required, immutable)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Role and Company checks
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isUserInCompany(companyId) {
+      return isAuthenticated() && getUserDoc().companyId == companyId;
+    }
+
+    function hasRoleInCompany(companyId, roles) {
+      let user = getUserDoc();
+      return isAuthenticated() && user.companyId == companyId && user.role in roles;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserDoc().role == 'admin') ||
+        (request.auth.token.email == "carpentier.thomas.02@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'role', 'companyId', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() < 150 &&
+             data.role in ['admin', 'manager', 'technician', 'viewer'] &&
+             data.companyId is string && data.companyId.size() > 0 && data.companyId.size() < 100 &&
+             data.createdAt is timestamp &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100));
+    }
+
+    function isValidCompany(data) {
+      return hasRequiredFields(['name', 'siren', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 150 &&
+             data.siren is string && data.siren.size() >= 9 && data.siren.size() <= 14 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidSite(data) {
+      return hasRequiredFields(['name', 'siret', 'type', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 150 &&
+             data.siret is string && data.siret.size() >= 14 && data.siret.size() <= 14 &&
+             data.type in ['ERP', 'ERT'] &&
+             data.createdAt is timestamp &&
+             (!('category' in data) || (data.category is string && data.category.size() < 50)) &&
+             (!('address' in data) || (data.address is string && data.address.size() < 300));
+    }
+
+    function isValidEquipment(data) {
+      return hasRequiredFields(['name', 'type', 'status', 'companyId', 'siteId', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 150 &&
+             data.type is string && data.type.size() > 0 && data.type.size() < 100 &&
+             data.status in ['OK', 'MAINTENANCE', 'HS'] &&
+             data.companyId is string && data.companyId.size() > 0 &&
+             data.siteId is string && data.siteId.size() > 0 &&
+             data.createdAt is timestamp &&
+             (!('brand' in data) || (data.brand is string && data.brand.size() < 100)) &&
+             (!('model' in data) || (data.model is string && data.model.size() < 100)) &&
+             (!('serialNumber' in data) || (data.serialNumber is string && data.serialNumber.size() < 100)) &&
+             (!('location' in data) || (data.location is string && data.location.size() < 200)) &&
+             (!('installationDate' in data) || data.installationDate is timestamp);
+    }
+
+    function isValidIntervention(data) {
+      return hasRequiredFields(['date', 'type', 'technicianName', 'providerName', 'status', 'companyId', 'siteId', 'createdAt']) &&
+             data.date is timestamp &&
+             data.type is string && data.type.size() > 0 && data.type.size() < 100 &&
+             data.technicianName is string && data.technicianName.size() > 0 && data.technicianName.size() < 100 &&
+             data.providerName is string && data.providerName.size() > 0 && data.providerName.size() < 100 &&
+             data.status is string && data.status.size() > 0 && data.status.size() < 50 &&
+             data.companyId is string && data.companyId.size() > 0 &&
+             data.siteId is string && data.siteId.size() > 0 &&
+             data.createdAt is timestamp &&
+             (!('equipmentId' in data) || (data.equipmentId is string && data.equipmentId.size() < 100)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000));
+    }
+
+    function isValidAnomaly(data) {
+      return hasRequiredFields(['description', 'severity', 'status', 'reportedBy', 'date', 'companyId', 'siteId', 'createdAt']) &&
+             data.description is string && data.description.size() > 0 && data.description.size() < 2000 &&
+             data.severity in ['observation', 'danger'] &&
+             data.status in ['open', 'resolved'] &&
+             data.reportedBy is string && data.reportedBy.size() > 0 && data.reportedBy.size() < 100 &&
+             data.date is timestamp &&
+             data.companyId is string && data.companyId.size() > 0 &&
+             data.siteId is string && data.siteId.size() > 0 &&
+             data.createdAt is timestamp &&
+             (!('equipmentId' in data) || (data.equipmentId is string && data.equipmentId.size() < 100));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // ===============================================================
+    // Collection Group Queries
+    // ===============================================================
+    match /{path=**}/equipments/{equipmentId} {
+      allow read: if isUserInCompany(resource.data.companyId) || isSuperAdmin();
+    }
+    match /{path=**}/interventions/{interventionId} {
+      allow read: if isUserInCompany(resource.data.companyId) || isSuperAdmin();
+    }
+    match /{path=**}/anomalies/{anomalyId} {
+      allow read: if isUserInCompany(resource.data.companyId) || isSuperAdmin();
+    }
+    match /{path=**}/documents/{documentId} {
+      allow read: if isUserInCompany(resource.data.companyId) || isSuperAdmin();
+    }
+
+    match /users/{userId} {
+      // Users can read their own profile, or admins can read all users in their company
+      allow read: if isOwner(userId) || isSuperAdmin() || (isAuthenticated() && getUserDoc().companyId == resource.data.companyId && getUserDoc().role in ['admin', 'manager']);
+      
+      // Only SuperAdmins or the user themselves (with restrictions) can create
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && uidUnchanged() && (
+        isSuperAdmin() || 
+        (isOwner(userId) && request.resource.data.role == 'viewer') // Default to viewer if self-registering
+      );
+      
+      // Only SuperAdmins can update roles. Users can update their own displayName.
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'email', 'companyId', 'createdAt']) && (
+        isSuperAdmin() ||
+        (isOwner(userId) && areImmutableFieldsUnchanged(['role']))
+      );
+      
+      allow delete: if isSuperAdmin();
+    }
+
+    match /companies/{companyId} {
+      // Users can read their own company
+      allow read: if isUserInCompany(companyId) || isSuperAdmin();
+      
+      allow create: if isSuperAdmin() && isValidCompany(request.resource.data);
+      allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin'])) && isValidCompany(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isSuperAdmin();
+
+      match /events/{eventId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && hasRequiredFields(['date', 'type', 'category', 'title', 'description', 'author', 'createdAt']) && request.resource.data.date is timestamp && request.resource.data.type is string && request.resource.data.category is string && request.resource.data.title is string && request.resource.data.description is string && request.resource.data.author is string && request.resource.data.createdAt is timestamp;
+        allow update: if false; // Events are immutable
+        allow delete: if false; // Events are immutable
+      }
+
+      match /providers/{providerId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && hasRequiredFields(['name', 'type', 'createdAt']) && request.resource.data.name is string && request.resource.data.type is string && request.resource.data.createdAt is timestamp;
+        allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && areImmutableFieldsUnchanged(['createdAt']);
+        allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
+      }
+
+      match /certifications/{certificationId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && hasRequiredFields(['user', 'role', 'type', 'createdAt']) && request.resource.data.user is string && request.resource.data.role is string && request.resource.data.type is string && request.resource.data.createdAt is timestamp;
+        allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && areImmutableFieldsUnchanged(['createdAt']);
+        allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
+      }
+
+      match /sites/{siteId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && isValidSite(request.resource.data);
+        allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && isValidSite(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+        allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
+
+        match /equipments/{equipmentId} {
+          allow read: if isUserInCompany(companyId) || isSuperAdmin();
+          allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidEquipment(request.resource.data);
+          allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidEquipment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+          allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+
+          match /interventions/{interventionId} {
+            allow read: if isUserInCompany(companyId) || isSuperAdmin();
+            allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidIntervention(request.resource.data);
+            allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidIntervention(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+            allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
+          }
+
+          match /documents/{documentId} {
+            allow read: if isUserInCompany(companyId) || isSuperAdmin();
+            allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && hasRequiredFields(['name', 'type', 'url', 'size', 'createdAt']) && request.resource.data.name is string && request.resource.data.type is string && request.resource.data.url is string && request.resource.data.createdAt is timestamp;
+            allow update: if false;
+            allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+          }
+        }
+
+        match /anomalies/{anomalyId} {
+          allow read: if isUserInCompany(companyId) || isSuperAdmin();
+          allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician', 'viewer'])) && isValidAnomaly(request.resource.data);
+          allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidAnomaly(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+          allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+        }
+      }
+    }
+  }
+}

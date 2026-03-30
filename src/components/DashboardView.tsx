@@ -1,0 +1,263 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { ComplianceRing } from './ComplianceRing';
+import { AlertTriangle, CalendarClock, ShieldCheck, Bell, Calendar as CalendarIcon, ArrowRight, AlertCircle, Info, Loader2 } from 'lucide-react';
+import { collectionGroup, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+
+export default function DashboardView({ companyId }: { companyId?: string }) {
+  const [equipments, setEquipments] = useState<any[]>([]);
+  const [anomalies, setAnomalies] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!companyId || companyId === 'PENDING') {
+      setLoading(false);
+      return;
+    }
+
+    const qEquipments = query(
+      collectionGroup(db, 'equipments'),
+      where('companyId', '==', companyId)
+    );
+
+    const unsubscribeEquipments = onSnapshot(qEquipments, (snapshot) => {
+      setEquipments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const qAnomalies = query(
+      collectionGroup(db, 'anomalies'),
+      where('companyId', '==', companyId)
+    );
+
+    const unsubscribeAnomalies = onSnapshot(qAnomalies, (snapshot) => {
+      setAnomalies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setLoading(false);
+    });
+
+    return () => {
+      unsubscribeEquipments();
+      unsubscribeAnomalies();
+    };
+  }, [companyId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="animate-spin text-blue-600" size={32} />
+      </div>
+    );
+  }
+
+  // Calculate KPIs
+  const totalEquipments = equipments.length;
+  const compliantEquipments = equipments.filter(e => e.status === 'OK').length;
+  const complianceRate = totalEquipments > 0 ? Math.round((compliantEquipments / totalEquipments) * 100) : 100;
+
+  const openAnomalies = anomalies.filter(a => a.status === 'open');
+  const criticalAnomalies = openAnomalies.filter(a => a.severity === 'danger').length;
+
+  const now = new Date();
+  const upcomingVgps = equipments.filter(e => {
+    if (e.status === 'HS') return false;
+    const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+    if (!lastDate) return true; // Needs maintenance if no date
+    const monthsDiff = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
+    return monthsDiff >= 11; // Due in 1 month or overdue
+  });
+
+  const kpis = [
+    { id: 1, label: 'Équipements Conformes', value: `${complianceRate}%`, icon: <ShieldCheck size={24} className="text-emerald-600" />, bg: 'bg-emerald-50', trend: `${compliantEquipments} / ${totalEquipments} équipements` },
+    { id: 2, label: 'VGP à venir (30j)', value: upcomingVgps.length.toString(), icon: <CalendarClock size={24} className="text-blue-600" />, bg: 'bg-blue-50', trend: 'À planifier' },
+    { id: 3, label: 'Anomalies Ouvertes', value: openAnomalies.length.toString(), icon: <AlertTriangle size={24} className="text-amber-600" />, bg: 'bg-amber-50', trend: `${criticalAnomalies} critiques` },
+  ];
+
+  const vgpCalendar = upcomingVgps.slice(0, 5).map((e, index) => {
+    const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+    let nextDate = new Date();
+    if (lastDate) {
+      nextDate = new Date(lastDate);
+      nextDate.setFullYear(nextDate.getFullYear() + 1);
+    }
+    const isUrgent = nextDate < now;
+
+    return {
+      id: e.id,
+      date: nextDate.toLocaleDateString('fr-FR'),
+      type: e.type,
+      provider: 'À définir',
+      status: isUrgent ? 'urgent' : 'upcoming'
+    };
+  });
+
+  const alerts = openAnomalies.slice(0, 5).map(a => ({
+    id: a.id,
+    severity: a.severity === 'danger' ? 'critical' : 'major',
+    message: `${a.description} (Équipement: ${a.equipmentId})`,
+    time: a.date?.toDate().toLocaleDateString('fr-FR') || 'Récemment'
+  }));
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold text-gray-900">Pilotage & Conformité</h2>
+        <div className="text-sm text-gray-500">Dernière mise à jour : À l'instant</div>
+      </div>
+
+      {/* KPIs Section */}
+      {totalEquipments === 0 ? (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-8 text-center space-y-4">
+          <div className="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+            <Info size={32} />
+          </div>
+          <div className="max-w-md mx-auto">
+            <h3 className="text-lg font-semibold text-blue-900">Bienvenue dans votre nouveau registre !</h3>
+            <p className="text-blue-700 mt-2">
+              Votre inventaire est actuellement vide. Pour découvrir toutes les fonctionnalités de l'application, vous pouvez générer des données de démonstration.
+            </p>
+          </div>
+          <button 
+            onClick={() => {
+              // Redirect to settings to seed data
+              window.location.hash = '#settings'; // This won't work with current App.tsx state, but we can use a callback or just tell them where to go
+              alert("Rendez-vous dans les 'Paramètres' pour générer les données de démonstration.");
+            }}
+            className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+          >
+            <ArrowRight size={18} />
+            Aller aux Paramètres
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center"
+          >
+            <h3 className="text-sm font-medium text-gray-500 mb-2 w-full text-left">Score Global</h3>
+            <ComplianceRing score={complianceRate} />
+          </motion.div>
+
+          {kpis.map((kpi, index) => (
+            <motion.div 
+              key={kpi.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 * (index + 1) }}
+              className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">{kpi.label}</p>
+                  <h4 className="text-3xl font-bold text-gray-900 mt-2">{kpi.value}</h4>
+                </div>
+                <div className={`p-3 rounded-lg ${kpi.bg}`}>
+                  {kpi.icon}
+                </div>
+              </div>
+              <div className="mt-4 text-sm text-gray-600 font-medium">
+                {kpi.trend}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Calendrier VGP */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 lg:col-span-2 overflow-hidden flex flex-col"
+        >
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="text-blue-600" size={20} />
+              <h3 className="text-lg font-medium text-gray-900">Calendrier des VGP</h3>
+            </div>
+          </div>
+          <div className="p-0 flex-1 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="p-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Échéance</th>
+                  <th className="p-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Type de Vérification</th>
+                  <th className="p-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Prestataire</th>
+                  <th className="p-4 text-xs font-medium text-gray-500 uppercase tracking-wider">Statut</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {vgpCalendar.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-4 text-center text-gray-500 text-sm">Aucune VGP à venir.</td>
+                  </tr>
+                ) : (
+                  vgpCalendar.map((vgp) => (
+                    <tr key={vgp.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="p-4 text-sm font-medium text-gray-900 whitespace-nowrap">{vgp.date}</td>
+                      <td className="p-4 text-sm text-gray-700">{vgp.type}</td>
+                      <td className="p-4 text-sm text-gray-600">{vgp.provider}</td>
+                      <td className="p-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                          ${vgp.status === 'urgent' ? 'bg-red-100 text-red-800' : 
+                            vgp.status === 'upcoming' ? 'bg-amber-100 text-amber-800' : 
+                            'bg-blue-100 text-blue-800'}`}
+                        >
+                          {vgp.status === 'urgent' ? 'Imminent' : vgp.status === 'upcoming' ? 'À planifier' : 'Planifié'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+
+        {/* Flux d'Alertes */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col"
+        >
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bell className="text-amber-600" size={20} />
+              <h3 className="text-lg font-medium text-gray-900">Alertes & Anomalies</h3>
+            </div>
+          </div>
+          <div className="p-6 flex-1 overflow-y-auto">
+            <div className="space-y-6">
+              {alerts.length === 0 ? (
+                <div className="text-center text-gray-500 text-sm">Aucune anomalie ouverte.</div>
+              ) : (
+                alerts.map((alert) => (
+                  <div key={alert.id} className="flex gap-4 relative">
+                    {/* Ligne de timeline (sauf pour le dernier) */}
+                    <div className="absolute left-[11px] top-8 bottom-[-24px] w-px bg-gray-200 last:hidden"></div>
+                    
+                    <div className="relative z-10 mt-1">
+                      {alert.severity === 'critical' && <div className="w-6 h-6 rounded-full bg-red-100 flex items-center justify-center"><AlertCircle size={14} className="text-red-600" /></div>}
+                      {alert.severity === 'major' && <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center"><AlertTriangle size={14} className="text-amber-600" /></div>}
+                      {alert.severity === 'info' && <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center"><Info size={14} className="text-blue-600" /></div>}
+                    </div>
+                    
+                    <div>
+                      <p className={`text-sm font-medium ${alert.severity === 'critical' ? 'text-red-700' : alert.severity === 'major' ? 'text-amber-700' : 'text-gray-900'}`}>
+                        {alert.message}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">{alert.time}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
