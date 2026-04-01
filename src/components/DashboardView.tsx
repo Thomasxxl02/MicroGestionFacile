@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ComplianceRing } from './ComplianceRing';
-import { AlertTriangle, CalendarClock, ShieldCheck, Bell, Calendar as CalendarIcon, ArrowRight, AlertCircle, Info, Loader2, FileText, Clock } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ShieldCheck, Bell, Calendar as CalendarIcon, ArrowRight, AlertCircle, Info, Loader2, FileText, Clock, Camera } from 'lucide-react';
 import { collectionGroup, query, where, onSnapshot, limit, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -159,7 +159,16 @@ export default function DashboardView({ companyId, onNavigate }: { companyId?: s
     <div className="space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold text-gray-900">Pilotage & Conformité</h2>
-        <div className="text-sm text-gray-500">Dernière mise à jour : À l'instant</div>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => (window as any).openGlobalScanner?.()}
+            className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 active:scale-95"
+          >
+            <Camera size={18} />
+            Scanner QR
+          </button>
+          <div className="text-sm text-gray-500">Dernière mise à jour : À l'instant</div>
+        </div>
       </div>
 
       {/* KPIs Section */}

@@ -8,7 +8,7 @@ import {
   LayoutDashboard, FireExtinguisher, DoorOpen, Settings, 
   Wind, BellRing, Lightbulb, Zap, Shield, Building, Users,
   BookOpen, Accessibility, Megaphone, LogOut, Droplets, Droplet, ShieldPlus, FileText,
-  Calendar
+  Calendar, Camera
 } from 'lucide-react';
 import SettingsView from './components/SettingsView';
 import DashboardView from './components/DashboardView';
@@ -22,6 +22,7 @@ import DocumentsView from './components/DocumentsView';
 import VGPView from './components/VGPView';
 import AuditTrailView from './components/AuditTrailView';
 import OnboardingView from './components/OnboardingView';
+import ScannerModal from './components/ScannerModal';
 import { useFirebase } from './contexts/FirebaseContext';
 
 type ViewType = 
@@ -47,7 +48,30 @@ type ViewType =
 
 export default function App() {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
+  const [showGlobalScanner, setShowGlobalScanner] = useState(false);
+  const [scannedEquipment, setScannedEquipment] = useState<{ id: string, category: ViewType } | null>(null);
   const { user, userData, loading, signInWithGoogle, logout } = useFirebase();
+
+  const handleEquipmentFound = (equipment: any) => {
+    const typeToCategory: Record<string, ViewType> = {
+      'Extincteur': 'extincteurs',
+      'Désenfumage': 'desenfumage',
+      'Porte Coupe-Feu': 'portes',
+      'Détection Incendie': 'detection',
+      'BAES': 'baes',
+      'Électricité': 'elec',
+      'Sprinkler': 'sprinkler',
+      'Poteau Incendie (PEI)': 'poteaux',
+      'Autre Moyen d\'Extinction': 'autres_extinctions'
+    };
+
+    const category = typeToCategory[equipment.type] || 'dashboard';
+    setScannedEquipment({ id: equipment.id, category });
+    setActiveView(category);
+  };
+
+  // Expose scanner to window for access from dashboard or other views
+  (window as any).openGlobalScanner = () => setShowGlobalScanner(true);
 
   if (loading) {
     return (
@@ -106,6 +130,16 @@ export default function App() {
           <div>
             <h1 className="text-lg font-bold text-gray-900 leading-tight">Registre<br/>Sécurité Pro</h1>
           </div>
+        </div>
+
+        <div className="px-4 py-4">
+          <button 
+            onClick={() => setShowGlobalScanner(true)}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
+          >
+            <Camera size={20} />
+            SCANNER QR
+          </button>
         </div>
         
         <nav className="flex-1 p-4 space-y-6">
@@ -185,9 +219,20 @@ export default function App() {
         {activeView === 'instructions' && <InstructionsView />}
         {activeView === 'audit' && <AuditTrailView companyId={userData?.companyId} />}
         {['extincteurs', 'desenfumage', 'portes', 'detection', 'baes', 'elec', 'sprinkler', 'poteaux', 'autres_extinctions'].includes(activeView) && (
-          <InventoryView category={activeView as any} companyId={userData?.companyId} />
+          <InventoryView 
+            category={activeView as any} 
+            companyId={userData?.companyId} 
+            initialEquipmentId={scannedEquipment?.category === activeView ? scannedEquipment.id : undefined}
+          />
         )}
       </main>
+
+      <ScannerModal 
+        isOpen={showGlobalScanner}
+        onClose={() => setShowGlobalScanner(false)}
+        companyId={userData?.companyId || ''}
+        onFound={handleEquipmentFound}
+      />
     </div>
   );
 }

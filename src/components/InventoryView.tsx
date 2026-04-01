@@ -13,12 +13,14 @@ import { handleFirestoreError, OperationType } from '../lib/firebaseError';
 import EquipmentDetailView from './EquipmentDetailView';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { logEvent } from '../lib/businessLogic';
+import ScannerModal from './ScannerModal';
 
 type Category = 'extincteurs' | 'desenfumage' | 'portes' | 'detection' | 'baes' | 'elec' | 'sprinkler' | 'poteaux' | 'autres_extinctions';
 
 interface InventoryViewProps {
   category: Category;
   companyId: string;
+  initialEquipmentId?: string;
 }
 
 interface Equipment {
@@ -78,7 +80,7 @@ function ExtinguisherHistory({ equipmentId, siteId, companyId }: { equipmentId: 
   );
 }
 
-export default function InventoryView({ category, companyId }: InventoryViewProps) {
+export default function InventoryView({ category, companyId, initialEquipmentId }: InventoryViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
@@ -97,6 +99,15 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
 
   const [sites, setSites] = useState<any[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+
+  useEffect(() => {
+    if (initialEquipmentId && items.length > 0) {
+      const found = items.find(i => i.id === initialEquipmentId);
+      if (found) {
+        setSelectedEquipment(found);
+      }
+    }
+  }, [initialEquipmentId, items]);
 
   useEffect(() => {
     if (!companyId || companyId === 'PENDING') return;
@@ -233,7 +244,6 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
     const found = items.find(i => i.id === scannedId || i.serialNumber === scannedId);
     if (found) {
       setSelectedEquipment(found);
-      setShowScanner(false);
       setScannedId('');
     } else {
       alert("Équipement non trouvé");
@@ -297,15 +307,13 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
             <Edit2 size={18} />
             Ajouter
           </button>
-          {category === 'extincteurs' && (
-            <button 
-              onClick={() => setShowScanner(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
-            >
-              <QrCode size={18} />
-              Scanner
-            </button>
-          )}
+          <button 
+            onClick={() => setShowScanner(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
+          >
+            <QrCode size={18} />
+            Scanner
+          </button>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
@@ -1055,67 +1063,12 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
       )}
 
       {/* Scanner Modal */}
-      {showScanner && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden"
-          >
-            <div className="flex justify-between items-center p-6 border-b border-gray-100">
-              <h3 className="text-lg font-semibold text-gray-900">Scanner un équipement</h3>
-              <button onClick={() => setShowScanner(false)} className="text-gray-400 hover:text-gray-600">
-                <XCircle size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="aspect-square bg-black rounded-lg overflow-hidden relative border-4 border-blue-500/30">
-                <QrScanner
-                  delay={300}
-                  onError={(err: any) => console.error(err)}
-                  onScan={(data: any) => {
-                    if (data) {
-                      const text = typeof data === 'string' ? data : data.text;
-                      setScannedId(text);
-                      const found = items.find(i => i.id === text || i.serialNumber === text);
-                      if (found) {
-                        setSelectedEquipment(found);
-                        setShowScanner(false);
-                        setScannedId('');
-                      }
-                    }
-                  }}
-                  style={{ width: '100%', height: '100%' }}
-                />
-                <div className="absolute inset-0 border-2 border-blue-500/50 pointer-events-none animate-pulse"></div>
-                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-[scan_2s_infinite]"></div>
-              </div>
-              
-              <div className="relative flex items-center py-2">
-                <div className="flex-grow border-t border-gray-200"></div>
-                <span className="flex-shrink-0 mx-4 text-gray-400 text-sm">ou saisie manuelle</span>
-                <div className="flex-grow border-t border-gray-200"></div>
-              </div>
-
-              <form onSubmit={handleScanSubmit} className="flex gap-2">
-                <input 
-                  type="text" 
-                  value={scannedId}
-                  onChange={(e) => setScannedId(e.target.value)}
-                  placeholder="ID ou Numéro de série"
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-                <button 
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                >
-                  Chercher
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        </div>
-      )}
+      <ScannerModal 
+        isOpen={showScanner}
+        onClose={() => setShowScanner(false)}
+        companyId={companyId}
+        onFound={(equipment) => setSelectedEquipment(equipment)}
+      />
     </div>
   );
 }
