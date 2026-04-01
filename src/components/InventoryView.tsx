@@ -6,11 +6,13 @@ import {
   Battery, Lightbulb, ShieldAlert, Wind, Zap, Loader2,
   ChevronDown, ChevronUp, History, Bell, Camera, Droplets, Droplet, ShieldPlus, Settings
 } from 'lucide-react';
+import QrScanner from 'react-qr-scanner';
 import { collectionGroup, query, where, onSnapshot, Timestamp, doc, updateDoc, addDoc, collection, orderBy } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
 import EquipmentDetailView from './EquipmentDetailView';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import { logEvent } from '../lib/businessLogic';
 
 type Category = 'extincteurs' | 'desenfumage' | 'portes' | 'detection' | 'baes' | 'elec' | 'sprinkler' | 'poteaux' | 'autres_extinctions';
 
@@ -30,6 +32,8 @@ interface Equipment {
   location?: string;
   installationDate?: Timestamp;
   lastMaintenanceDate?: Timestamp;
+  nextInspectionDate?: Timestamp;
+  inspectionFrequencyMonths?: number;
   agentType?: string;
   charge?: string;
   companyId: string;
@@ -878,7 +882,21 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
               }
 
               try {
-                await addDoc(collection(db, `companies/${companyId}/sites/${siteId}/equipments`), newEquipment);
+                const equipRef = await addDoc(collection(db, `companies/${companyId}/sites/${siteId}/equipments`), newEquipment);
+                
+                // Log to journal
+                const user = auth.currentUser;
+                if (user) {
+                  await logEvent({
+                    companyId,
+                    type: 'EQUIPMENT_ADD',
+                    description: `Ajout de l'équipement : ${newEquipment.name} (${newEquipment.type}) sur le site ${sites.find(s => s.id === siteId)?.name || siteId}`,
+                    authorId: user.uid,
+                    authorName: user.displayName || user.email || 'Utilisateur',
+                    metadata: { equipmentId: equipRef.id, siteId }
+                  });
+                }
+
                 setShowAddModal(false);
               } catch (err) {
                 console.error("Error adding equipment:", err);
@@ -1051,13 +1069,26 @@ export default function InventoryView({ category, companyId }: InventoryViewProp
               </button>
             </div>
             <div className="p-6 space-y-4">
-              <div className="aspect-square bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center relative overflow-hidden">
-                <QrCode size={48} className="text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500 text-center px-4">
-                  Placez le code QR ou code-barres au centre du cadre
-                </p>
-                <div className="absolute inset-0 border-4 border-blue-500/30 rounded-lg m-8"></div>
-                <div className="absolute top-1/2 left-8 right-8 h-0.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse"></div>
+              <div className="aspect-square bg-black rounded-lg overflow-hidden relative border-4 border-blue-500/30">
+                <QrScanner
+                  delay={300}
+                  onError={(err: any) => console.error(err)}
+                  onScan={(data: any) => {
+                    if (data) {
+                      const text = typeof data === 'string' ? data : data.text;
+                      setScannedId(text);
+                      const found = items.find(i => i.id === text || i.serialNumber === text);
+                      if (found) {
+                        setSelectedEquipment(found);
+                        setShowScanner(false);
+                        setScannedId('');
+                      }
+                    }
+                  }}
+                  style={{ width: '100%', height: '100%' }}
+                />
+                <div className="absolute inset-0 border-2 border-blue-500/50 pointer-events-none animate-pulse"></div>
+                <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-[scan_2s_infinite]"></div>
               </div>
               
               <div className="relative flex items-center py-2">

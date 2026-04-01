@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ComplianceRing } from './ComplianceRing';
-import { AlertTriangle, CalendarClock, ShieldCheck, Bell, Calendar as CalendarIcon, ArrowRight, AlertCircle, Info, Loader2 } from 'lucide-react';
-import { collectionGroup, query, where, onSnapshot } from 'firebase/firestore';
+import { AlertTriangle, CalendarClock, ShieldCheck, Bell, Calendar as CalendarIcon, ArrowRight, AlertCircle, Info, Loader2, FileText, Clock } from 'lucide-react';
+import { collectionGroup, query, where, onSnapshot, limit, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 
-export default function DashboardView({ companyId }: { companyId?: string }) {
+export default function DashboardView({ companyId, onNavigate }: { companyId?: string, onNavigate?: (view: any) => void }) {
   const [equipments, setEquipments] = useState<any[]>([]);
   const [anomalies, setAnomalies] = useState<any[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,12 +33,24 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
 
     const unsubscribeAnomalies = onSnapshot(qAnomalies, (snapshot) => {
       setAnomalies(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    const qDocs = query(
+      collectionGroup(db, 'documents'),
+      where('companyId', '==', companyId),
+      orderBy('createdAt', 'desc'),
+      limit(5)
+    );
+
+    const unsubscribeDocs = onSnapshot(qDocs, (snapshot) => {
+      setRecentDocuments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
     });
 
     return () => {
       unsubscribeEquipments();
       unsubscribeAnomalies();
+      unsubscribeDocs();
     };
   }, [companyId]);
 
@@ -52,32 +65,77 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
   // Calculate KPIs
   const totalEquipments = equipments.length;
   const compliantEquipments = equipments.filter(e => e.status === 'OK').length;
-  const complianceRate = totalEquipments > 0 ? Math.round((compliantEquipments / totalEquipments) * 100) : 100;
-
+  
   const openAnomalies = anomalies.filter(a => a.status === 'open');
   const criticalAnomalies = openAnomalies.filter(a => a.severity === 'danger').length;
 
   const now = new Date();
   const upcomingVgps = equipments.filter(e => {
     if (e.status === 'HS') return false;
-    const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
-    if (!lastDate) return true; // Needs maintenance if no date
-    const monthsDiff = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24 * 30);
-    return monthsDiff >= 11; // Due in 1 month or overdue
+    
+    let nextDate: Date;
+    if (e.nextInspectionDate) {
+      nextDate = e.nextInspectionDate.toDate();
+    } else {
+      const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+      if (!lastDate) return true; // Needs maintenance if no date
+      
+      nextDate = new Date(lastDate);
+      const frequencyMonths = e.inspectionFrequencyMonths || 12;
+      nextDate.setMonth(nextDate.getMonth() + frequencyMonths);
+    }
+    
+    const diffDays = Math.ceil((nextDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays <= 30; // Due in 30 days or overdue
   });
+
+  const overdueVgps = upcomingVgps.filter(e => {
+    let nextDate: Date;
+    if (e.nextInspectionDate) {
+      nextDate = e.nextInspectionDate.toDate();
+    } else {
+      const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+      if (!lastDate) return true;
+      nextDate = new Date(lastDate);
+      const frequencyMonths = e.inspectionFrequencyMonths || 12;
+      nextDate.setMonth(nextDate.getMonth() + frequencyMonths);
+    }
+    return nextDate < now;
+  }).length;
+
+  // Robust Compliance Score Calculation
+  // 1. Equipment Status (40%)
+  const equipmentScore = totalEquipments > 0 ? (compliantEquipments / totalEquipments) * 40 : 40;
+  
+  // 2. VGP Punctuality (30%)
+  // Penalty for each overdue VGP (max 30% penalty)
+  const vgpPenalty = Math.min(overdueVgps * 5, 30);
+  const vgpScore = 30 - vgpPenalty;
+
+  // 3. Anomaly Management (30%)
+  // Penalty for each critical anomaly (max 30% penalty)
+  const anomalyPenalty = Math.min(criticalAnomalies * 10, 30);
+  const anomalyScore = 30 - anomalyPenalty;
+
+  const complianceRate = Math.round(equipmentScore + vgpScore + anomalyScore);
 
   const kpis = [
     { id: 1, label: 'Équipements Conformes', value: `${complianceRate}%`, icon: <ShieldCheck size={24} className="text-emerald-600" />, bg: 'bg-emerald-50', trend: `${compliantEquipments} / ${totalEquipments} équipements` },
-    { id: 2, label: 'VGP à venir (30j)', value: upcomingVgps.length.toString(), icon: <CalendarClock size={24} className="text-blue-600" />, bg: 'bg-blue-50', trend: 'À planifier' },
+    { id: 2, label: 'VGP à venir (30j)', value: upcomingVgps.length.toString(), icon: <CalendarClock size={24} className="text-blue-600" />, bg: 'bg-blue-50', trend: 'À planifier', action: () => onNavigate?.('vgp') },
     { id: 3, label: 'Anomalies Ouvertes', value: openAnomalies.length.toString(), icon: <AlertTriangle size={24} className="text-amber-600" />, bg: 'bg-amber-50', trend: `${criticalAnomalies} critiques` },
   ];
 
-  const vgpCalendar = upcomingVgps.slice(0, 5).map((e, index) => {
-    const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+  const vgpCalendar = upcomingVgps.slice(0, 5).map((e) => {
     let nextDate = new Date();
-    if (lastDate) {
-      nextDate = new Date(lastDate);
-      nextDate.setFullYear(nextDate.getFullYear() + 1);
+    if (e.nextInspectionDate) {
+      nextDate = e.nextInspectionDate.toDate();
+    } else {
+      const lastDate = e.lastMaintenanceDate?.toDate() || e.installationDate?.toDate();
+      if (lastDate) {
+        nextDate = new Date(lastDate);
+        const frequencyMonths = e.inspectionFrequencyMonths || 12;
+        nextDate.setMonth(nextDate.getMonth() + frequencyMonths);
+      }
     }
     const isUrgent = nextDate < now;
 
@@ -117,11 +175,7 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
             </p>
           </div>
           <button 
-            onClick={() => {
-              // Redirect to settings to seed data
-              window.location.hash = '#settings'; // This won't work with current App.tsx state, but we can use a callback or just tell them where to go
-              alert("Rendez-vous dans les 'Paramètres' pour générer les données de démonstration.");
-            }}
+            onClick={() => onNavigate?.('settings')}
             className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
           >
             <ArrowRight size={18} />
@@ -145,7 +199,8 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 * (index + 1) }}
-              className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between"
+              onClick={kpi.action}
+              className={`bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col justify-between ${kpi.action ? 'cursor-pointer hover:border-blue-300 transition-all' : ''}`}
             >
               <div className="flex items-start justify-between">
                 <div>
@@ -156,8 +211,9 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
                   {kpi.icon}
                 </div>
               </div>
-              <div className="mt-4 text-sm text-gray-600 font-medium">
+              <div className="mt-4 text-sm text-gray-600 font-medium flex items-center justify-between">
                 {kpi.trend}
+                {kpi.action && <ArrowRight size={14} className="text-gray-400" />}
               </div>
             </motion.div>
           ))}
@@ -177,6 +233,12 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
               <CalendarIcon className="text-blue-600" size={20} />
               <h3 className="text-lg font-medium text-gray-900">Calendrier des VGP</h3>
             </div>
+            <button 
+              onClick={() => onNavigate?.('vgp')}
+              className="text-sm text-blue-600 hover:underline font-medium"
+            >
+              Voir tout
+            </button>
           </div>
           <div className="p-0 flex-1 overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -236,7 +298,6 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
               ) : (
                 alerts.map((alert) => (
                   <div key={alert.id} className="flex gap-4 relative">
-                    {/* Ligne de timeline (sauf pour le dernier) */}
                     <div className="absolute left-[11px] top-8 bottom-[-24px] w-px bg-gray-200 last:hidden"></div>
                     
                     <div className="relative z-10 mt-1">
@@ -257,7 +318,57 @@ export default function DashboardView({ companyId }: { companyId?: string }) {
             </div>
           </div>
         </motion.div>
+
+        {/* Documents Récents */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="bg-white rounded-xl shadow-sm border border-gray-100 lg:col-span-3 flex flex-col"
+        >
+          <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="text-emerald-600" size={20} />
+              <h3 className="text-lg font-medium text-gray-900">Documents Récents</h3>
+            </div>
+            <button 
+              onClick={() => onNavigate?.('documents')}
+              className="text-sm text-blue-600 hover:underline font-medium"
+            >
+              Voir tout
+            </button>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              {recentDocuments.length === 0 ? (
+                <div className="col-span-full text-center text-gray-500 text-sm py-4">Aucun document récent.</div>
+              ) : (
+                recentDocuments.map((doc) => (
+                  <div key={doc.id} className="p-4 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer group">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-100 transition-colors">
+                        <FileText size={20} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-medium text-gray-900 truncate">{doc.name}</h4>
+                        <p className="text-xs text-gray-500">{doc.category}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <div className="flex items-center gap-1">
+                        <Clock size={10} />
+                        {doc.createdAt?.toDate().toLocaleDateString('fr-FR')}
+                      </div>
+                      <span className="uppercase font-semibold">{doc.type}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </motion.div>
       </div>
     </div>
   );
 }
+

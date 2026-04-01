@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { 
   ArrowLeft, QrCode, CheckCircle, AlertTriangle, AlertCircle, 
-  Info, FileText, Image as ImageIcon, Wrench, Calendar, MapPin, Tag, Download, Camera, Loader2, Plus, X, Upload
+  Info, FileText, Image as ImageIcon, Wrench, Calendar, MapPin, Tag, Download, Camera, Loader2, Plus, X, Upload, Shield
 } from 'lucide-react';
-import { collection, query, where, onSnapshot, orderBy, Timestamp, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, Timestamp, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
 import { generateInterventionReport } from '../lib/pdfGenerator';
+import { logEvent, calculateNextVGP } from '../lib/businessLogic';
 
 type TabType = 'identity' | 'history' | 'documents' | 'anomalies';
 
@@ -24,8 +25,13 @@ interface Intervention {
   type: string;
   technicianName: string;
   providerName: string;
-  status: string;
+  status: 'DRAFT' | 'PENDING_SIGNATURE' | 'SIGNED' | string;
   notes?: string;
+  signature?: {
+    signedBy: string;
+    signedAt: Timestamp;
+    hash: string;
+  };
   companyId: string;
   siteId: string;
   equipmentId?: string;
@@ -77,7 +83,7 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
     type: 'Vérification Annuelle',
     technicianName: '',
     providerName: '',
-    status: 'Conforme',
+    status: 'DRAFT',
     notes: ''
   });
 
@@ -148,6 +154,7 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
       // 1. Add intervention
       await addDoc(collection(db, interventionsPath), {
         ...interventionForm,
+        status: 'DRAFT', // Interventions start as DRAFT
         date: Timestamp.now(),
         companyId,
         siteId: equipment.siteId,
@@ -155,39 +162,89 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
         createdAt: Timestamp.now()
       });
 
-      // 2. Update equipment lastMaintenanceDate and status
+      // 2. Update equipment lastMaintenanceDate, nextInspectionDate and status
       const newStatus = interventionForm.status === 'Conforme' ? 'OK' : 
                         interventionForm.status === 'Non Conforme' ? 'HS' : 'MAINTENANCE';
       
+      const { nextDate, frequencyMonths } = calculateNextVGP(equipment.type, new Date());
+
       await updateDoc(equipmentRef, {
         lastMaintenanceDate: Timestamp.now(),
+        nextInspectionDate: Timestamp.fromDate(nextDate),
+        inspectionFrequencyMonths: frequencyMonths,
         status: newStatus
       });
 
-      // 3. Add to global journal
-      await addDoc(collection(db, journalPath), {
-        type: 'MAINTENANCE',
-        title: `Intervention: ${interventionForm.type}`,
-        description: `Maintenance effectuée sur l'équipement ${equipment.name} (${equipment.serialNumber || 'Sans N/S'}) par ${interventionForm.technicianName || 'Technicien'}. Statut: ${interventionForm.status}.`,
-        date: Timestamp.now(),
-        author: auth.currentUser?.displayName || auth.currentUser?.email || 'Système',
-        siteId: equipment.siteId,
-        equipmentId: equipment.id,
-        createdAt: Timestamp.now()
-      });
+      // 3. Add to global journal via business logic
+      const user = auth.currentUser;
+      if (user) {
+        await logEvent({
+          companyId,
+          type: 'VGP_PERFORMED',
+          description: `Maintenance effectuée sur l'équipement ${equipment.name} (${equipment.serialNumber || 'Sans N/S'}) par ${interventionForm.technicianName || 'Technicien'}. Statut: ${interventionForm.status}.`,
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Système',
+          metadata: { 
+            siteId: equipment.siteId, 
+            equipmentId: equipment.id,
+            nextInspectionDate: nextDate.toISOString()
+          }
+        });
+      }
 
       setShowInterventionModal(false);
       setInterventionForm({
         type: 'Vérification Annuelle',
         technicianName: '',
         providerName: '',
-        status: 'Conforme',
+        status: 'DRAFT',
         notes: ''
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, interventionsPath, auth);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSignIntervention = async (intervention: Intervention) => {
+    if (!companyId || !equipment.siteId || !equipment.id) return;
+    
+    // Add confirmation dialog for the signature workflow
+    if (!window.confirm("En signant cette intervention, elle deviendra définitivement inaltérable (lecture seule). Confirmez-vous cette action ?")) {
+      return;
+    }
+    
+    try {
+      const interventionRef = doc(db, `companies/${companyId}/sites/${equipment.siteId}/equipments/${equipment.id}/interventions/${intervention.id}`);
+      
+      // Generate a simple hash of the intervention data for the signature
+      const dataToHash = `${intervention.id}-${intervention.date.toMillis()}-${intervention.technicianName}`;
+      const hash = btoa(dataToHash); // Simple base64 encoding for demo, use crypto in prod
+      
+      const user = auth.currentUser;
+      
+      await updateDoc(interventionRef, {
+        status: 'SIGNED',
+        signature: {
+          signedBy: user?.uid || 'unknown',
+          signedAt: Timestamp.now(),
+          hash: hash
+        }
+      });
+
+      if (user) {
+        await logEvent({
+          companyId,
+          type: 'INTERVENTION_SIGNED',
+          description: `Intervention signée et verrouillée sur l'équipement ${equipment.name} (${equipment.internalId})`,
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Utilisateur',
+          metadata: { equipmentId: equipment.id, interventionId: intervention.id, hash }
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `interventions/${intervention.id}`, auth);
     }
   };
 
@@ -217,6 +274,20 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
         equipmentId: equipment.id,
         createdAt: Timestamp.now()
       });
+
+      // Log to journal
+      const user = auth.currentUser;
+      if (user) {
+        await logEvent({
+          companyId,
+          type: 'ANOMALY_REPORT',
+          description: `Nouvelle anomalie signalée sur ${equipment.name} : ${anomalyForm.description}`,
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Utilisateur',
+          metadata: { equipmentId: equipment.id, severity: anomalyForm.severity }
+        });
+      }
+
       setShowAnomalyModal(false);
       setAnomalyForm({
         description: '',
@@ -227,6 +298,34 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
       handleFirestoreError(error, OperationType.CREATE, anomaliesPath, auth);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResolveAnomaly = async (anomalyId: string) => {
+    if (!companyId || !equipment.siteId) return;
+    
+    try {
+      const anomalyRef = doc(db, `companies/${companyId}/sites/${equipment.siteId}/anomalies/${anomalyId}`);
+      await updateDoc(anomalyRef, {
+        status: 'resolved',
+        resolvedAt: Timestamp.now(),
+        resolvedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Utilisateur'
+      });
+
+      // Log to journal
+      const user = auth.currentUser;
+      if (user) {
+        await logEvent({
+          companyId,
+          type: 'ANOMALY_RESOLVE',
+          description: `Anomalie résolue sur ${equipment.name}`,
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Utilisateur',
+          metadata: { equipmentId: equipment.id, anomalyId }
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `anomalies/${anomalyId}`, auth);
     }
   };
 
@@ -451,12 +550,30 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
                         <span className="text-gray-500 flex items-center gap-1.5"><Wrench size={14}/> {event.technicianName} ({event.providerName})</span>
                         <div className="flex items-center gap-3">
                           <span className={`font-medium px-2 py-1 rounded ${
-                            event.status === 'Conforme' ? 'bg-emerald-50 text-emerald-600' : 
-                            event.status === 'Non Conforme' ? 'bg-red-50 text-red-600' : 
-                            'bg-amber-50 text-amber-600'
+                            event.status === 'SIGNED' ? 'bg-emerald-50 text-emerald-600' : 
+                            event.status === 'PENDING_SIGNATURE' ? 'bg-amber-50 text-amber-600' : 
+                            'bg-gray-100 text-gray-600'
                           }`}>
-                            {event.status}
+                            {event.status === 'SIGNED' ? 'Signé' : event.status === 'PENDING_SIGNATURE' ? 'En attente de signature' : 'Brouillon'}
                           </span>
+                          
+                          {event.status === 'SIGNED' && event.signature && (
+                            <span className="text-emerald-600 flex items-center gap-1" title={`Hash: ${event.signature.hash}`}>
+                              <Shield size={14} />
+                              Certifié
+                            </span>
+                          )}
+                          
+                          {event.status !== 'SIGNED' && (
+                            <button 
+                              onClick={() => handleSignIntervention(event)}
+                              className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 font-medium hover:underline"
+                            >
+                              <CheckCircle size={14} />
+                              Signer
+                            </button>
+                          )}
+
                           <button 
                             onClick={() => handleDownloadReport(event)}
                             className="flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium hover:underline"
@@ -585,7 +702,12 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
                     <div className="flex items-center justify-between mt-auto">
                       <span className="text-sm text-gray-500">Signalé par : {anomaly.reportedBy}</span>
                       {anomaly.status === 'open' && (
-                        <button className="text-sm font-medium text-blue-600 hover:underline">Marquer comme résolu</button>
+                        <button 
+                          onClick={() => handleResolveAnomaly(anomaly.id)}
+                          className="text-sm font-medium text-blue-600 hover:underline"
+                        >
+                          Marquer comme résolu
+                        </button>
                       )}
                     </div>
                   </div>
@@ -657,6 +779,8 @@ export default function EquipmentDetailView({ equipment, companyId, onBack }: Eq
                   onChange={(e) => setInterventionForm({...interventionForm, status: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
+                  <option value="DRAFT">Brouillon</option>
+                  <option value="PENDING_SIGNATURE">En attente de signature</option>
                   <option value="Conforme">Conforme</option>
                   <option value="Observation">Observation</option>
                   <option value="Non Conforme">Non Conforme</option>

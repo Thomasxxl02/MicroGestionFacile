@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Building, MapPin, FileText, History, UploadCloud, Eye, ArrowLeft, ShieldAlert, CheckCircle, AlertTriangle, Plus } from 'lucide-react';
-import { collection, query, getDocs, doc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+import { Building, MapPin, FileText, History, UploadCloud, Eye, ArrowLeft, ShieldAlert, CheckCircle, AlertTriangle, Plus, Search, Loader2 } from 'lucide-react';
+import { collection, query, getDocs, doc, setDoc, serverTimestamp, deleteDoc, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { isValidSiret, suggestERPCategory, logEvent, fetchCompanyInfo } from '../lib/businessLogic';
 
 import { auth } from '../firebase';
 
@@ -13,7 +14,43 @@ export default function SitesView({ companyId }: { companyId: string }) {
   const [sites, setSites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [sireneLoading, setSireneLoading] = useState(false);
+  const [sireneError, setSireneError] = useState('');
   
+  const [formData, setFormData] = useState({
+    name: '',
+    siret: '',
+    address: '',
+    type: 'ERP',
+    erpCategory: '',
+    erpType: '',
+    capacity: 0
+  });
+
+  const handleSireneLookup = async () => {
+    if (!formData.siret || (formData.siret.length !== 9 && formData.siret.length !== 14)) {
+      setSireneError("Veuillez entrer un SIREN (9 chiffres) ou SIRET (14 chiffres) valide.");
+      return;
+    }
+
+    setSireneLoading(true);
+    setSireneError('');
+
+    try {
+      const info = await fetchCompanyInfo(formData.siret);
+      setFormData(prev => ({
+        ...prev,
+        name: info.name,
+        siret: info.siret || prev.siret,
+        address: info.address
+      }));
+    } catch (error: any) {
+      setSireneError(error.message || "Erreur lors de la recherche SIRENE.");
+    } finally {
+      setSireneLoading(false);
+    }
+  };
+
   const fetchSites = async () => {
     if (!companyId || companyId === 'PENDING') return;
     setLoading(true);
@@ -33,24 +70,63 @@ export default function SitesView({ companyId }: { companyId: string }) {
     fetchSites();
   }, [companyId]);
 
+  const [capacity, setCapacity] = useState<number>(0);
+  const [suggestedCategory, setSuggestedCategory] = useState<string>('');
+
+  const handleCapacityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value) || 0;
+    setCapacity(val);
+    setSuggestedCategory(suggestERPCategory(val));
+    setFormData(prev => ({ ...prev, capacity: val }));
+  };
+
   const handleAddSite = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-      const newSite = {
-        name: formData.get('name') as string,
-        siret: formData.get('siret') as string,
-        type: formData.get('type') as string,
-        erpCategory: formData.get('erpCategory') as string,
-        erpType: formData.get('erpType') as string,
-        capacity: Number(formData.get('capacity')) || 0,
-        address: formData.get('address') as string,
-        createdAt: serverTimestamp()
-      };
+    
+    // Validate SIRET only if it's 14 digits (SIREN is 9)
+    if (formData.siret.length === 14 && !isValidSiret(formData.siret)) {
+      alert("Le numéro SIRET saisi est invalide (doit comporter 14 chiffres et respecter l'algorithme de Luhn).");
+      return;
+    }
+
+    const newSite = {
+      name: formData.name,
+      siret: formData.siret,
+      type: formData.type,
+      erpCategory: formData.erpCategory || suggestedCategory,
+      erpType: formData.erpType,
+      capacity: formData.capacity,
+      address: formData.address,
+      createdAt: serverTimestamp()
+    };
 
     try {
       const newSiteRef = doc(collection(db, `companies/${companyId}/sites`));
       await setDoc(newSiteRef, newSite);
+      
+      // Log event
+      const user = auth.currentUser;
+      if (user) {
+        await logEvent({
+          companyId,
+          type: 'SITE_ADD',
+          description: `Ajout de l'établissement : ${newSite.name} (${formData.siret})`,
+          authorId: user.uid,
+          authorName: user.displayName || user.email || 'Utilisateur',
+          metadata: { siteId: newSiteRef.id }
+        });
+      }
+
       setShowAddModal(false);
+      setFormData({
+        name: '',
+        siret: '',
+        address: '',
+        type: 'ERP',
+        erpCategory: '',
+        erpType: '',
+        capacity: 0
+      });
       fetchSites();
     } catch (error) {
       console.error("Error adding site:", error);
@@ -262,24 +338,65 @@ export default function SitesView({ companyId }: { companyId: string }) {
             <h3 className="text-lg font-bold text-gray-900 mb-4">Ajouter un établissement</h3>
             <form onSubmit={handleAddSite} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l'établissement</label>
-                <input name="name" type="text" required className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ex: Boutique Lyon Centre" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">SIRET ou SIREN</label>
+                <div className="flex gap-2">
+                  <input 
+                    name="siret" 
+                    type="text" 
+                    required 
+                    maxLength={14} 
+                    minLength={9} 
+                    value={formData.siret}
+                    onChange={(e) => setFormData({...formData, siret: e.target.value})}
+                    className="flex-1 p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                    placeholder="12345678900012" 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={handleSireneLookup}
+                    disabled={sireneLoading}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm flex items-center gap-2"
+                  >
+                    {sireneLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                    Rechercher
+                  </button>
+                </div>
+                {sireneError && <p className="text-xs text-red-600 mt-1">{sireneError}</p>}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">SIRET</label>
-                <input name="siret" type="text" required maxLength={14} minLength={14} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="12345678900012" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nom de l'établissement</label>
+                <input 
+                  name="name" 
+                  type="text" 
+                  required 
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="Ex: Boutique Lyon Centre" 
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                  <select name="type" required className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                  <select 
+                    name="type" 
+                    required 
+                    value={formData.type}
+                    onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
                     <option value="ERP">ERP (Établissement Recevant du Public)</option>
                     <option value="ERT">ERT (Établissement Recevant des Travailleurs)</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Catégorie ERP (1 à 5)</label>
-                  <select name="erpCategory" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                  <select 
+                    name="erpCategory" 
+                    value={formData.erpCategory}
+                    onChange={(e) => setFormData({...formData, erpCategory: e.target.value})}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
                     <option value="">Non applicable (ERT)</option>
                     <option value="1">1ère Catégorie (&gt; 1500 pers.)</option>
                     <option value="2">2ème Catégorie (701 à 1500 pers.)</option>
@@ -292,7 +409,12 @@ export default function SitesView({ companyId }: { companyId: string }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Type d'Activité (ERP)</label>
-                  <select name="erpType" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white">
+                  <select 
+                    name="erpType" 
+                    value={formData.erpType}
+                    onChange={(e) => setFormData({...formData, erpType: e.target.value})}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
                     <option value="">Non applicable</option>
                     <option value="J">J - Structures d'accueil pour personnes âgées</option>
                     <option value="L">L - Salles d'auditions, de conférences</option>
@@ -312,12 +434,32 @@ export default function SitesView({ companyId }: { companyId: string }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Effectif Total</label>
-                  <input name="capacity" type="number" min="0" className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Ex: 50" />
+                  <input 
+                    name="capacity" 
+                    type="number" 
+                    min="0" 
+                    value={formData.capacity}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                    placeholder="Ex: 50" 
+                    onChange={handleCapacityChange}
+                  />
+                  {suggestedCategory && (
+                    <p className="text-[10px] text-blue-600 mt-1 font-medium italic">
+                      Catégorie ERP suggérée : {suggestedCategory}ème Catégorie
+                    </p>
+                  )}
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Adresse</label>
-                <textarea name="address" rows={2} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Adresse complète"></textarea>
+                <textarea 
+                  name="address" 
+                  rows={2} 
+                  value={formData.address}
+                  onChange={(e) => setFormData({...formData, address: e.target.value})}
+                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="Adresse complète"
+                ></textarea>
               </div>
               <div className="flex justify-end gap-3 mt-6">
                 <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors">

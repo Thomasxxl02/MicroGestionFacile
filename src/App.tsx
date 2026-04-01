@@ -7,7 +7,8 @@ import React, { useState } from 'react';
 import { 
   LayoutDashboard, FireExtinguisher, DoorOpen, Settings, 
   Wind, BellRing, Lightbulb, Zap, Shield, Building, Users,
-  BookOpen, Accessibility, Megaphone, LogOut, Droplets, Droplet, ShieldPlus, FileText
+  BookOpen, Accessibility, Megaphone, LogOut, Droplets, Droplet, ShieldPlus, FileText,
+  Calendar
 } from 'lucide-react';
 import SettingsView from './components/SettingsView';
 import DashboardView from './components/DashboardView';
@@ -18,11 +19,15 @@ import JournalView from './components/JournalView';
 import AccessibilityView from './components/AccessibilityView';
 import InstructionsView from './components/InstructionsView';
 import DocumentsView from './components/DocumentsView';
+import VGPView from './components/VGPView';
+import AuditTrailView from './components/AuditTrailView';
+import OnboardingView from './components/OnboardingView';
 import { useFirebase } from './contexts/FirebaseContext';
 
 type ViewType = 
   | 'dashboard' 
   | 'settings' 
+  | 'vgp'
   | 'extincteurs' 
   | 'desenfumage' 
   | 'portes' 
@@ -37,7 +42,8 @@ type ViewType =
   | 'journal'
   | 'accessibility'
   | 'instructions'
-  | 'documents';
+  | 'documents'
+  | 'audit';
 
 export default function App() {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
@@ -81,6 +87,15 @@ export default function App() {
     );
   }
 
+  if (!userData?.companyId || userData.companyId === 'PENDING') {
+    return (
+      <OnboardingView 
+        user={user} 
+        onComplete={() => window.location.reload()} 
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
       <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full overflow-y-auto">
@@ -98,6 +113,7 @@ export default function App() {
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 px-3">Pilotage</div>
             <div className="space-y-1">
               <NavItem icon={<LayoutDashboard size={18} />} label="Tableau de bord" onClick={() => setActiveView('dashboard')} active={activeView === 'dashboard'} />
+              <NavItem icon={<Calendar size={18} />} label="Échéances VGP" onClick={() => setActiveView('vgp')} active={activeView === 'vgp'} />
             </div>
           </div>
 
@@ -131,6 +147,7 @@ export default function App() {
             <div className="space-y-1">
               <NavItem icon={<Building size={18} />} label="Établissements & Plans" onClick={() => setActiveView('sites')} active={activeView === 'sites'} />
               <NavItem icon={<Users size={18} />} label="Prestataires & Habilitations" onClick={() => setActiveView('providers')} active={activeView === 'providers'} />
+              <NavItem icon={<Shield size={18} />} label="Piste d'Audit" onClick={() => setActiveView('audit')} active={activeView === 'audit'} />
               <NavItem icon={<Settings size={18} />} label="Paramètres" onClick={() => setActiveView('settings')} active={activeView === 'settings'} />
             </div>
           </div>
@@ -157,61 +174,18 @@ export default function App() {
       </aside>
 
       <main className="flex-1 p-8 overflow-y-auto">
-        {userData?.companyId === 'PENDING' ? (
-          <div className="flex flex-col items-center justify-center h-full max-w-lg mx-auto text-center space-y-6">
-            <div className="bg-blue-100 text-blue-600 p-4 rounded-full">
-              <Building size={48} />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900">Bienvenue sur Registre Sécurité Pro</h2>
-            <p className="text-gray-600">
-              Votre compte est en attente d'affectation à une entreprise. 
-              Veuillez contacter votre administrateur pour qu'il vous invite, ou contactez le support pour créer une nouvelle entreprise.
-            </p>
-            {/* For demo purposes, we'll add a button to bootstrap a company */}
-            <div className="flex flex-col gap-3 w-full">
-              <button 
-                onClick={async () => {
-                  // Demo bootstrap logic
-                  const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
-                  const { db } = await import('./firebase');
-                  const newCompanyId = user.uid; // Use user UID as company ID for demo
-                  
-                  await setDoc(doc(db, 'companies', newCompanyId), {
-                    name: 'Ma Nouvelle Entreprise',
-                    siren: '123456789',
-                    createdAt: serverTimestamp()
-                  });
-                  
-                  await setDoc(doc(db, 'users', user.uid), {
-                    companyId: newCompanyId,
-                    role: 'admin'
-                  }, { merge: true });
-                  
-                  window.location.reload();
-                }}
-                className="w-full bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
-              >
-                Créer mon entreprise (Démo)
-              </button>
-              <p className="text-xs text-gray-400 italic">
-                Note : Cette action créera une structure d'entreprise vide associée à votre compte.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            {activeView === 'dashboard' && <DashboardView companyId={userData?.companyId} />}
-            {activeView === 'settings' && <SettingsView companyId={userData?.companyId} />}
-            {activeView === 'sites' && <SitesView companyId={userData?.companyId} />}
-            {activeView === 'providers' && <ProvidersView companyId={userData?.companyId} />}
-            {activeView === 'journal' && <JournalView companyId={userData?.companyId} />}
-            {activeView === 'documents' && <DocumentsView companyId={userData?.companyId} />}
-            {activeView === 'accessibility' && <AccessibilityView companyId={userData?.companyId} />}
-            {activeView === 'instructions' && <InstructionsView />}
-            {['extincteurs', 'desenfumage', 'portes', 'detection', 'baes', 'elec', 'sprinkler', 'poteaux', 'autres_extinctions'].includes(activeView) && (
-              <InventoryView category={activeView as any} companyId={userData?.companyId} />
-            )}
-          </>
+        {activeView === 'dashboard' && <DashboardView companyId={userData?.companyId} onNavigate={setActiveView} />}
+        {activeView === 'settings' && <SettingsView companyId={userData?.companyId} />}
+        {activeView === 'vgp' && <VGPView companyId={userData?.companyId} />}
+        {activeView === 'sites' && <SitesView companyId={userData?.companyId} />}
+        {activeView === 'providers' && <ProvidersView companyId={userData?.companyId} />}
+        {activeView === 'journal' && <JournalView companyId={userData?.companyId} />}
+        {activeView === 'documents' && <DocumentsView companyId={userData?.companyId} />}
+        {activeView === 'accessibility' && <AccessibilityView companyId={userData?.companyId} />}
+        {activeView === 'instructions' && <InstructionsView />}
+        {activeView === 'audit' && <AuditTrailView companyId={userData?.companyId} />}
+        {['extincteurs', 'desenfumage', 'portes', 'detection', 'baes', 'elec', 'sprinkler', 'poteaux', 'autres_extinctions'].includes(activeView) && (
+          <InventoryView category={activeView as any} companyId={userData?.companyId} />
         )}
       </main>
     </div>

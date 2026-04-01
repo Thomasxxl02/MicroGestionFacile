@@ -40,6 +40,8 @@
 //   - serialNumber: string (optional)
 //   - location: string (optional)
 //   - installationDate: timestamp (optional)
+//   - nextInspectionDate: timestamp (optional)
+//   - inspectionFrequencyMonths: number (optional)
 //   - createdAt: timestamp (required, immutable)
 //
 // Collection: companies/{companyId}/sites/{siteId}/equipments/{equipmentId}/interventions
@@ -49,8 +51,9 @@
 //   - type: string (required)
 //   - technicianName: string (required)
 //   - providerName: string (required)
-//   - status: string (required)
+//   - status: string (required, enum: DRAFT, PENDING_SIGNATURE, SIGNED)
 //   - notes: string (optional)
+//   - signature: map (optional, contains signedBy, signedAt, hash)
 //   - createdAt: timestamp (required, immutable)
 //
 // Collection: companies/{companyId}/sites/{siteId}/anomalies
@@ -132,13 +135,13 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasRequiredFields(['uid', 'email', 'role', 'companyId', 'createdAt']) &&
+      return hasRequiredFields(['uid', 'role', 'companyId', 'createdAt']) &&
              data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
-             data.email is string && isValidEmail(data.email) && data.email.size() < 150 &&
+             (!('email' in data) || data.email == null || data.email == '' || (data.email is string && isValidEmail(data.email) && data.email.size() < 150)) &&
              data.role in ['admin', 'manager', 'technician', 'viewer'] &&
              data.companyId is string && data.companyId.size() > 0 && data.companyId.size() < 100 &&
              data.createdAt is timestamp &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100));
+             (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() < 100));
     }
 
     function isValidCompany(data) {
@@ -170,7 +173,9 @@ service cloud.firestore {
              (!('model' in data) || (data.model is string && data.model.size() < 100)) &&
              (!('serialNumber' in data) || (data.serialNumber is string && data.serialNumber.size() < 100)) &&
              (!('location' in data) || (data.location is string && data.location.size() < 200)) &&
-             (!('installationDate' in data) || data.installationDate is timestamp);
+             (!('installationDate' in data) || data.installationDate is timestamp) &&
+             (!('nextInspectionDate' in data) || data.nextInspectionDate is timestamp) &&
+             (!('inspectionFrequencyMonths' in data) || data.inspectionFrequencyMonths is number);
     }
 
     function isValidIntervention(data) {
@@ -179,12 +184,24 @@ service cloud.firestore {
              data.type is string && data.type.size() > 0 && data.type.size() < 100 &&
              data.technicianName is string && data.technicianName.size() > 0 && data.technicianName.size() < 100 &&
              data.providerName is string && data.providerName.size() > 0 && data.providerName.size() < 100 &&
-             data.status is string && data.status.size() > 0 && data.status.size() < 50 &&
+             data.status in ['DRAFT', 'PENDING_SIGNATURE', 'SIGNED'] &&
              data.companyId is string && data.companyId.size() > 0 &&
              data.siteId is string && data.siteId.size() > 0 &&
              data.createdAt is timestamp &&
              (!('equipmentId' in data) || (data.equipmentId is string && data.equipmentId.size() < 100)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000));
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000)) &&
+             (!('signature' in data) || (data.signature is map && data.signature.keys().hasAll(['signedBy', 'signedAt', 'hash'])));
+    }
+
+    function isValidAuditLog(data) {
+      return hasRequiredFields(['type', 'description', 'authorId', 'authorName', 'companyId', 'createdAt']) &&
+             data.type is string && data.type.size() > 0 &&
+             data.description is string && data.description.size() > 0 &&
+             data.authorId is string && data.authorId.size() > 0 &&
+             data.authorName is string && data.authorName.size() > 0 &&
+             data.companyId is string && data.companyId.size() > 0 &&
+             data.createdAt is timestamp &&
+             (!('metadata' in data) || data.metadata is map);
     }
 
     function isValidAnomaly(data) {
@@ -203,6 +220,21 @@ service cloud.firestore {
     // ===============================================================
     // Rules
     // ===============================================================
+
+    // ===============================================================
+    // Audit Logs
+    // ===============================================================
+    match /audit_logs/{logId} {
+      // Only SuperAdmins can read audit logs globally, or company admins for their company
+      allow read: if isSuperAdmin() || (isAuthenticated() && getUserDoc().companyId == resource.data.companyId && getUserDoc().role == 'admin');
+      
+      // Any authenticated user can create an audit log (for their actions)
+      allow create: if isAuthenticated() && isValidAuditLog(request.resource.data) && request.resource.data.authorId == request.auth.uid;
+      
+      // Audit logs are strictly immutable
+      allow update: if false;
+      allow delete: if false;
+    }
 
     // ===============================================================
     // Collection Group Queries
@@ -230,10 +262,17 @@ service cloud.firestore {
         (isOwner(userId) && request.resource.data.role == 'viewer') // Default to viewer if self-registering
       );
       
-      // Only SuperAdmins can update roles. Users can update their own displayName.
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'email', 'companyId', 'createdAt']) && (
-        isSuperAdmin() ||
-        (isOwner(userId) && areImmutableFieldsUnchanged(['role']))
+      // Only SuperAdmins can update roles and companyId. Users can update their own displayName.
+      // Exception: Users with companyId 'PENDING' (or an invalid company) can update their companyId and set role to 'admin' when creating a new company.
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && (
+        (isSuperAdmin() && areImmutableFieldsUnchanged(['uid', 'email', 'createdAt'])) ||
+        (isOwner(userId) && areImmutableFieldsUnchanged(['uid', 'email', 'createdAt']) && (
+          (
+            (resource.data.get('companyId', 'PENDING') == 'PENDING' || !exists(/databases/$(database)/documents/companies/$(resource.data.get('companyId', 'PENDING')))) 
+            && request.resource.data.role == 'admin'
+          ) ||
+          areImmutableFieldsUnchanged(['companyId', 'role'])
+        ))
       );
       
       allow delete: if isSuperAdmin();
@@ -243,7 +282,8 @@ service cloud.firestore {
       // Users can read their own company
       allow read: if isUserInCompany(companyId) || isSuperAdmin();
       
-      allow create: if isSuperAdmin() && isValidCompany(request.resource.data);
+      // Allow any authenticated user to create a company (they will become admin via the user update)
+      allow create: if isAuthenticated() && isValidCompany(request.resource.data);
       allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin'])) && isValidCompany(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
       allow delete: if isSuperAdmin();
 
@@ -268,6 +308,20 @@ service cloud.firestore {
         allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
       }
 
+      match /accessibility/{docId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+        allow update: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+        allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
+      }
+
+      match /documents/{documentId} {
+        allow read: if isUserInCompany(companyId) || isSuperAdmin();
+        allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && hasRequiredFields(['name', 'type', 'url', 'size', 'createdAt']) && request.resource.data.name is string && request.resource.data.type is string && request.resource.data.url is string && request.resource.data.size is number && request.resource.data.createdAt is timestamp;
+        allow update: if false;
+        allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+      }
+
       match /sites/{siteId} {
         allow read: if isUserInCompany(companyId) || isSuperAdmin();
         allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager'])) && isValidSite(request.resource.data);
@@ -283,15 +337,15 @@ service cloud.firestore {
           match /interventions/{interventionId} {
             allow read: if isUserInCompany(companyId) || isSuperAdmin();
             allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidIntervention(request.resource.data);
-            allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && isValidIntervention(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
-            allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin']);
-          }
-
-          match /documents/{documentId} {
-            allow read: if isUserInCompany(companyId) || isSuperAdmin();
-            allow create: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) && hasRequiredFields(['name', 'type', 'url', 'size', 'createdAt']) && request.resource.data.name is string && request.resource.data.type is string && request.resource.data.url is string && request.resource.data.createdAt is timestamp;
-            allow update: if false;
-            allow delete: if isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager']);
+            
+            // If the intervention is already SIGNED, it cannot be updated anymore (immutable)
+            allow update: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin', 'manager', 'technician'])) 
+                          && isValidIntervention(request.resource.data) 
+                          && areImmutableFieldsUnchanged(['createdAt'])
+                          && resource.data.status != 'SIGNED';
+                          
+            // Cannot delete if SIGNED
+            allow delete: if (isSuperAdmin() || hasRoleInCompany(companyId, ['admin'])) && resource.data.status != 'SIGNED';
           }
         }
 

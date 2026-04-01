@@ -1,5 +1,7 @@
 {
   "name": "Registre Sécurité Pro",
   "description": "Application de dématérialisation du registre de sécurité incendie pour les entreprises françaises.",
-  "requestFramePermissions": ["camera"]
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

@@ -1,183 +1,110 @@
 {
   "entities": {
-    "User": {
-      "title": "User",
-      "description": "Represents an application user.",
-      "type": "object",
-      "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string", "format": "email" },
-        "displayName": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "manager", "technician", "viewer"] },
-        "companyId": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
-      },
-      "required": ["uid", "email", "role", "companyId", "createdAt"]
-    },
     "Company": {
       "title": "Company",
-      "description": "Represents a company entity.",
+      "description": "Represents a legal entity (Siren) using the application.",
       "type": "object",
       "properties": {
-        "name": { "type": "string" },
-        "siren": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "name": { "type": "string", "description": "Legal name of the company" },
+        "siren": { "type": "string", "description": "9-digit Siren number" },
+        "address": { "type": "string", "description": "Headquarters address" },
+        "activity": { "type": "string", "description": "APE/NAF code" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string", "description": "UID of the creator" }
       },
       "required": ["name", "siren", "createdAt"]
     },
-    "Site": {
-      "title": "Site",
-      "description": "Represents a specific establishment (Siret).",
+    "User": {
+      "title": "User",
+      "description": "Represents a user or technician associated with a company.",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
-        "siret": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "manager", "technician", "viewer"] },
+        "companyId": { "type": "string", "description": "Reference to the Company" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "companyId"]
+    },
+    "Site": {
+      "title": "Site",
+      "description": "An establishment (Siret) belonging to a company.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "siret": { "type": "string", "description": "14-digit Siret number" },
         "type": { "type": "string", "enum": ["ERP", "ERT"] },
-        "category": { "type": "string" },
+        "erpCategory": { "type": "string", "enum": ["1", "2", "3", "4", "5"] },
+        "erpType": { "type": "string" },
+        "capacity": { "type": "number" },
         "address": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "siret", "type", "createdAt"]
     },
     "Equipment": {
       "title": "Equipment",
-      "description": "Represents a piece of safety equipment.",
+      "description": "A safety equipment (extinguisher, BAES, etc.) located on a site.",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
         "type": { "type": "string" },
-        "status": { "type": "string", "enum": ["OK", "MAINTENANCE", "HS"] },
         "brand": { "type": "string" },
         "model": { "type": "string" },
         "serialNumber": { "type": "string" },
         "location": { "type": "string" },
-        "installationDate": { "type": "timestamp" },
+        "status": { "type": "string", "enum": ["OK", "MAINTENANCE", "HS"] },
+        "installationDate": { "type": "string", "format": "date-time" },
+        "lastMaintenanceDate": { "type": "string", "format": "date-time" },
+        "nextInspectionDate": { "type": "string", "format": "date-time" },
+        "inspectionFrequencyMonths": { "type": "number" },
         "companyId": { "type": "string" },
         "siteId": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "type", "status", "companyId", "siteId", "createdAt"]
+      "required": ["name", "type", "status", "companyId", "siteId"]
     },
     "Intervention": {
       "title": "Intervention",
-      "description": "Represents a maintenance intervention.",
+      "description": "A maintenance operation performed on an equipment.",
       "type": "object",
       "properties": {
-        "date": { "type": "timestamp" },
         "type": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
         "technicianName": { "type": "string" },
         "providerName": { "type": "string" },
-        "status": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "PENDING_SIGNATURE", "SIGNED"] },
         "notes": { "type": "string" },
+        "signature": { "type": "string", "description": "Base64 signature image or hash" },
         "companyId": { "type": "string" },
         "siteId": { "type": "string" },
-        "equipmentId": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["date", "type", "technicianName", "providerName", "status", "companyId", "siteId", "createdAt"]
+      "required": ["type", "date", "status", "companyId", "siteId"]
     },
-    "Anomaly": {
-      "title": "Anomaly",
-      "description": "Represents a reported anomaly.",
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable log of critical actions for compliance.",
       "type": "object",
       "properties": {
-        "equipmentId": { "type": "string" },
+        "type": { "type": "string" },
         "description": { "type": "string" },
-        "severity": { "type": "string", "enum": ["observation", "danger"] },
-        "status": { "type": "string", "enum": ["open", "resolved"] },
-        "reportedBy": { "type": "string" },
-        "date": { "type": "timestamp" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
         "companyId": { "type": "string" },
-        "siteId": { "type": "string" },
-        "createdAt": { "type": "timestamp" }
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["description", "severity", "status", "reportedBy", "date", "companyId", "siteId", "createdAt"]
-    },
-    "Provider": {
-      "title": "Provider",
-      "description": "Represents an external service provider.",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "type": { "type": "string" },
-        "specialties": { "type": "array", "items": { "type": "string" } },
-        "contact": { "type": "string" },
-        "phone": { "type": "string" },
-        "contractEnd": { "type": "string" },
-        "status": { "type": "string", "enum": ["Actif", "Expiré"] },
-        "createdAt": { "type": "timestamp" }
-      },
-      "required": ["name", "type", "createdAt"]
-    },
-    "Certification": {
-      "title": "Certification",
-      "description": "Represents an internal employee certification.",
-      "type": "object",
-      "properties": {
-        "user": { "type": "string" },
-        "role": { "type": "string" },
-        "type": { "type": "string" },
-        "deliveryDate": { "type": "string" },
-        "expiryDate": { "type": "string" },
-        "status": { "type": "string", "enum": ["Valid", "Expiring", "Expired"] },
-        "createdAt": { "type": "timestamp" }
-      },
-      "required": ["user", "role", "type", "createdAt"]
-    },
-    "Event": {
-      "title": "Event",
-      "description": "Represents a journal event.",
-      "type": "object",
-      "properties": {
-        "date": { "type": "timestamp" },
-        "type": { "type": "string" },
-        "category": { "type": "string" },
-        "title": { "type": "string" },
-        "description": { "type": "string" },
-        "author": { "type": "string" },
-        "hash": { "type": "string" },
-        "hasAttachment": { "type": "boolean" },
-        "createdAt": { "type": "timestamp" }
-      },
-      "required": ["date", "type", "category", "title", "description", "author", "createdAt"]
+      "required": ["type", "description", "authorId", "companyId", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": { "$ref": "User" },
-      "description": "User document."
-    },
-    "/companies/{companyId}": {
-      "schema": { "$ref": "Company" },
-      "description": "Company document."
-    },
-    "/companies/{companyId}/events/{eventId}": {
-      "schema": { "$ref": "Event" },
-      "description": "Event document."
-    },
-    "/companies/{companyId}/providers/{providerId}": {
-      "schema": { "$ref": "Provider" },
-      "description": "Provider document."
-    },
-    "/companies/{companyId}/certifications/{certificationId}": {
-      "schema": { "$ref": "Certification" },
-      "description": "Certification document."
-    },
-    "/companies/{companyId}/sites/{siteId}": {
-      "schema": { "$ref": "Site" },
-      "description": "Site document."
-    },
-    "/companies/{companyId}/sites/{siteId}/equipments/{equipmentId}": {
-      "schema": { "$ref": "Equipment" },
-      "description": "Equipment document."
-    },
-    "/companies/{companyId}/sites/{siteId}/equipments/{equipmentId}/interventions/{interventionId}": {
-      "schema": { "$ref": "Intervention" },
-      "description": "Intervention document."
-    },
-    "/companies/{companyId}/sites/{siteId}/anomalies/{anomalyId}": {
-      "schema": { "$ref": "Anomaly" },
-      "description": "Anomaly document."
-    }
+    "/companies/{companyId}": { "schema": "Company", "description": "Company root" },
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/companies/{companyId}/sites/{siteId}": { "schema": "Site", "description": "Establishments" },
+    "/companies/{companyId}/sites/{siteId}/equipments/{equipmentId}": { "schema": "Equipment", "description": "Safety equipment" },
+    "/companies/{companyId}/sites/{siteId}/equipments/{equipmentId}/interventions/{interventionId}": { "schema": "Intervention", "description": "Maintenance history" },
+    "/audit_logs/{logId}": { "schema": "AuditLog", "description": "Global audit trail" }
   }
 }

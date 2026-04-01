@@ -187,7 +187,7 @@ export const generateJournalReport = (events: any[], companyName: string = 'Entr
   doc.save(`Registre_Securite_${new Date().getTime()}.pdf`);
 };
 
-export const generateAccessibilityRegister = () => {
+export const generateAccessibilityRegister = (data: any, companyName: string = 'Établissement') => {
   const doc = new jsPDF();
   
   // --- HEADER ---
@@ -197,7 +197,7 @@ export const generateAccessibilityRegister = () => {
   
   doc.setFontSize(10);
   doc.setTextColor(100, 100, 100);
-  doc.text(`Établissement: Siège Social Paris`, 105, 28, { align: 'center' });
+  doc.text(`Établissement: ${companyName}`, 105, 28, { align: 'center' });
   doc.text(`Date d'édition: ${new Date().toLocaleDateString('fr-FR')}`, 105, 34, { align: 'center' });
 
   doc.setDrawColor(200, 200, 200);
@@ -211,22 +211,26 @@ export const generateAccessibilityRegister = () => {
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text('Attestation de conformité déposée en préfecture le: 12/05/2023', 14, 58);
-  doc.text('Catégorie ERP: 3ème Catégorie', 14, 64);
-  doc.text('Type ERP: Type M (Magasins de vente, centres commerciaux)', 14, 70);
+  doc.text(`Attestation de conformité déposée en préfecture le: ${data?.attestationDate || 'N/A'}`, 14, 58);
+  doc.text(`Catégorie ERP: ${data?.erpCategory || 'N/A'}ème Catégorie`, 14, 64);
+  doc.text(`Type ERP: Type ${data?.erpType || 'N/A'}`, 14, 70);
 
   // --- FORMATION DU PERSONNEL ---
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
   doc.text('2. Formation du Personnel', 14, 85);
 
+  const personnelData = (data?.personnel || []).map((p: any) => [
+    p.name,
+    p.role,
+    p.training,
+    p.date
+  ]);
+
   autoTable(doc, {
     startY: 90,
     head: [['Nom de l\'employé', 'Fonction', 'Formation Suivie', 'Date de validation']],
-    body: [
-      ['Sophie Martin', 'Accueil', 'Accueil des personnes handicapées', '15/09/2025'],
-      ['Marc Dubois', 'Sécurité', 'Évacuation PMR', '10/10/2025']
-    ],
+    body: personnelData.length > 0 ? personnelData : [['Aucun personnel formé enregistré', '', '', '']],
     theme: 'grid',
     headStyles: { fillColor: [243, 244, 246], textColor: [0, 0, 0], fontStyle: 'bold' },
     styles: { fontSize: 10 }
@@ -239,15 +243,24 @@ export const generateAccessibilityRegister = () => {
   doc.setFont('helvetica', 'bold');
   doc.text('3. Équipements Adaptés & Dérogations', 14, finalY);
 
+  const equipmentData = (data?.equipments || []).map((e: any) => [
+    'Équipement',
+    e.description,
+    e.status === 'ok' ? 'Opérationnel' : 'À vérifier'
+  ]);
+
+  const derogationData = (data?.derogations || []).map((d: any) => [
+    'Dérogation',
+    d.description,
+    `Accordée (${d.reference})`
+  ]);
+
+  const combinedData = [...equipmentData, ...derogationData];
+
   autoTable(doc, {
     startY: finalY + 5,
     head: [['Type', 'Description', 'Statut']],
-    body: [
-      ['Équipement', 'Rampe d\'accès amovible à l\'entrée principale', 'Opérationnel'],
-      ['Équipement', 'Sanitaires PMR au RDC', 'Opérationnel'],
-      ['Équipement', 'Boucle magnétique au guichet', 'Opérationnel'],
-      ['Dérogation', 'Absence d\'ascenseur vers le 2ème étage (Bâtiment classé)', 'Accordée (Arrêté n°2023-456)']
-    ],
+    body: combinedData.length > 0 ? combinedData : [['Aucune donnée enregistrée', '', '']],
     theme: 'grid',
     headStyles: { fillColor: [243, 244, 246], textColor: [0, 0, 0], fontStyle: 'bold' },
     styles: { fontSize: 10 }

@@ -1,38 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, deleteDoc, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Save, Building2, Users, Plus, Trash2, Shield, Wrench, Eye, Database, Loader2 } from 'lucide-react';
+import { Save, Building2, Users, Plus, Trash2, Shield, Wrench, Eye, Database, Loader2, Lock, Download, Trash } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
 
 export default function SettingsView({ companyId }: { companyId: string }) {
-  const [activeTab, setActiveTab] = useState<'company' | 'users'>('company');
+  const [activeTab, setActiveTab] = useState<'company' | 'users' | 'gdpr'>('company');
 
   return (
     <div className="max-w-4xl space-y-6">
       <h2 className="text-2xl font-semibold text-gray-900">Paramètres</h2>
       
-      <div className="flex border-b border-gray-200">
+      <div className="flex border-b border-gray-200 overflow-x-auto">
         <button 
-          className={`py-3 px-6 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'company' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`py-3 px-6 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'company' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
           onClick={() => setActiveTab('company')}
         >
           <Building2 size={18} />
           Entreprise
         </button>
         <button 
-          className={`py-3 px-6 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'users' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          className={`py-3 px-6 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'users' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
           onClick={() => setActiveTab('users')}
         >
           <Users size={18} />
           Utilisateurs & Techniciens
         </button>
+        <button 
+          className={`py-3 px-6 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap ${activeTab === 'gdpr' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setActiveTab('gdpr')}
+        >
+          <Lock size={18} />
+          RGPD & Confidentialité
+        </button>
       </div>
 
-      {activeTab === 'company' ? (
-        <CompanySettings companyId={companyId} />
-      ) : (
-        <UserManagement companyId={companyId} />
-      )}
+      {activeTab === 'company' && <CompanySettings companyId={companyId} />}
+      {activeTab === 'users' && <UserManagement companyId={companyId} />}
+      {activeTab === 'gdpr' && <GDPRSettings companyId={companyId} />}
     </div>
   );
 }
@@ -116,7 +121,7 @@ function CompanySettings({ companyId }: { companyId: string }) {
         const equipments = [
           {
             name: "Extincteur Eau Pulvérisée 6L",
-            type: "extincteurs",
+            type: "Extincteur",
             brand: "Sicli",
             model: "E6A",
             serialNumber: `SN-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
@@ -127,12 +132,12 @@ function CompanySettings({ companyId }: { companyId: string }) {
             companyId,
             siteId: site.id,
             agentType: "Eau + Additif",
-            charge: 6,
+            charge: "6L",
             createdAt: serverTimestamp()
           },
           {
             name: "Bloc de Secours (BAES)",
-            type: "baes",
+            type: "BAES",
             brand: "Kaufel",
             model: "Primo",
             serialNumber: `SN-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
@@ -146,7 +151,7 @@ function CompanySettings({ companyId }: { companyId: string }) {
           },
           {
             name: "Extincteur CO2 2kg",
-            type: "extincteurs",
+            type: "Extincteur",
             brand: "Desautel",
             model: "C2",
             serialNumber: `SN-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
@@ -157,7 +162,48 @@ function CompanySettings({ companyId }: { companyId: string }) {
             companyId,
             siteId: site.id,
             agentType: "CO2",
-            charge: 2,
+            charge: "2Kg",
+            createdAt: serverTimestamp()
+          },
+          {
+            name: "Centrale SSI",
+            type: "Détection Incendie",
+            brand: "Chubb",
+            model: "Sensis",
+            location: "Local Technique",
+            status: "OK",
+            companyId,
+            siteId: site.id,
+            createdAt: serverTimestamp()
+          },
+          {
+            name: "Désenfumage Hall",
+            type: "Désenfumage",
+            brand: "Souchier",
+            location: "Toiture Hall",
+            status: "OK",
+            companyId,
+            siteId: site.id,
+            createdAt: serverTimestamp()
+          },
+          {
+            name: "Porte CF Escalier A",
+            type: "Porte Coupe-Feu",
+            brand: "Hormann",
+            location: "RDC Escalier A",
+            status: "OK",
+            companyId,
+            siteId: site.id,
+            createdAt: serverTimestamp()
+          },
+          {
+            name: "Poteau Incendie Nord",
+            type: "Poteau Incendie (PEI)",
+            brand: "Bayard",
+            location: "Parking Nord",
+            status: "OK",
+            companyId,
+            siteId: site.id,
             createdAt: serverTimestamp()
           }
         ];
@@ -180,6 +226,19 @@ function CompanySettings({ companyId }: { companyId: string }) {
               createdAt: serverTimestamp()
             });
           }
+
+          // Add one intervention for each equipment
+          await addDoc(collection(db, `companies/${companyId}/sites/${site.id}/equipments/${eqRef.id}/interventions`), {
+            type: "Maintenance Annuelle",
+            date: Timestamp.fromDate(new Date(2025, 5, 10)),
+            technicianName: "Jean Tech",
+            providerName: "SécuPlus SARL",
+            status: "Terminé",
+            notes: "Vérification standard effectuée. Équipement conforme.",
+            companyId,
+            siteId: site.id,
+            createdAt: serverTimestamp()
+          });
         }
       }
 
@@ -210,6 +269,70 @@ function CompanySettings({ companyId }: { companyId: string }) {
       for (const event of events) {
         await addDoc(collection(db, `companies/${companyId}/events`), event);
       }
+
+      // 4. Add Mock Documents (Reports, Plans, Certs)
+      const mockDocs = [
+        {
+          name: "Rapport Q18 - Vérification Annuelle 2025",
+          type: "PDF",
+          category: "rapport",
+          siteId: siteRefs[0].id,
+          siteName: siteRefs[0].name,
+          url: "https://picsum.photos/seed/report1/800/1200",
+          size: 1887436, // 1.8 MB in bytes
+          author: "Bureau Veritas",
+          createdAt: Timestamp.fromDate(new Date(2025, 5, 12))
+        },
+        {
+          name: "Plan d'Évacuation - RDC & R+1",
+          type: "PDF",
+          category: "plan",
+          siteId: siteRefs[1].id,
+          siteName: siteRefs[1].name,
+          url: "https://picsum.photos/seed/plan1/1200/800",
+          size: 4404019, // 4.2 MB in bytes
+          author: "Architecte Sécurité",
+          createdAt: Timestamp.fromDate(new Date(2024, 10, 20))
+        },
+        {
+          name: "Certificat de Conformité SSI",
+          type: "PDF",
+          category: "certificat",
+          siteId: siteRefs[0].id,
+          siteName: siteRefs[0].name,
+          url: "https://picsum.photos/seed/cert1/800/1100",
+          size: 943718, // 0.9 MB in bytes
+          author: "Chubb France",
+          createdAt: Timestamp.fromDate(new Date(2025, 0, 15))
+        }
+      ];
+
+      for (const docData of mockDocs) {
+        await addDoc(collection(db, `companies/${companyId}/documents`), docData);
+      }
+
+      // 5. Add Accessibility Data
+      const accessibilityData = {
+        attestationDate: "12/05/2023",
+        attestationNumber: "ACC-2023-789",
+        erpCategory: "3",
+        erpType: "M",
+        personnel: [
+          { name: "Sophie Martin", role: "Accueil", training: "Accueil des personnes handicapées", date: "15/09/2025", status: "valid" },
+          { name: "Marc Dubois", role: "Sécurité", training: "Évacuation PMR", date: "10/10/2025", status: "valid" }
+        ],
+        equipments: [
+          { type: "Rampe", description: "Rampe d'accès amovible disponible à l'accueil (sonnette extérieure).", status: "ok" },
+          { type: "Sanitaires", description: "Sanitaires PMR situés au RDC, porte de gauche.", status: "ok" },
+          { type: "Boucle", description: "Boucle magnétique installée au guichet principal.", status: "ok" }
+        ],
+        derogations: [
+          { title: "Dérogation Technique (Architecturale)", description: "Impossibilité d'installer un ascenseur pour l'accès au 2ème étage (Bâtiment classé historique).", reference: "Arrêté préfectoral n°2023-456" }
+        ],
+        updatedAt: serverTimestamp()
+      };
+
+      await setDoc(doc(db, `companies/${companyId}/accessibility`, "main"), accessibilityData);
 
       alert('Données de démonstration générées avec succès !');
       window.location.reload();
@@ -451,6 +574,110 @@ function UserManagement({ companyId }: { companyId: string }) {
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function GDPRSettings({ companyId }: { companyId: string }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleExportData = () => {
+    alert("L'exportation complète de vos données est en cours de préparation. Un lien de téléchargement vous sera envoyé par email.");
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirm = window.confirm("ATTENTION : Cette action est irréversible. Toutes les données de votre entreprise, y compris les registres légaux, seront définitivement supprimées. Voulez-vous continuer ?");
+    if (!confirm) return;
+
+    const secondConfirm = window.prompt("Pour confirmer la suppression, veuillez saisir le nom de votre entreprise :");
+    if (!secondConfirm) return;
+
+    setIsDeleting(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      alert("Demande de suppression enregistrée. Votre compte sera clôturé sous 48h conformément au RGPD.");
+    } catch (error) {
+      console.error("Error deleting account:", error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
+        <div className="flex items-center gap-3 text-blue-600 mb-2">
+          <Shield size={24} />
+          <h3 className="text-lg font-bold">Engagement de Confidentialité</h3>
+        </div>
+        <p className="text-sm text-gray-600 leading-relaxed">
+          Registre Sécurité Pro s'engage à protéger vos données conformément au Règlement Général sur la Protection des Données (RGPD). 
+          Vos données sont hébergées exclusivement au sein de l'Union Européenne et sont chiffrées au repos.
+        </p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+              <Database size={16} /> Conservation des données
+            </h4>
+            <p className="text-xs text-gray-500">
+              Les registres de sécurité et rapports d'intervention sont conservés pendant 10 ans pour répondre aux obligations légales françaises.
+            </p>
+          </div>
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <h4 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+              <Lock size={16} /> Accès restreint
+            </h4>
+            <p className="text-xs text-gray-500">
+              Seuls les utilisateurs autorisés de votre entreprise et les autorités compétentes (sur demande) peuvent accéder à vos registres.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-6">
+        <h3 className="text-lg font-medium text-gray-900">Vos Droits</h3>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
+            <div>
+              <p className="font-semibold text-gray-900">Portabilité des données</p>
+              <p className="text-xs text-gray-500">Téléchargez l'intégralité de vos données au format JSON structuré.</p>
+            </div>
+            <button 
+              onClick={handleExportData}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Download size={16} /> Exporter
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 border border-red-100 rounded-xl bg-red-50/30">
+            <div>
+              <p className="font-semibold text-red-900">Droit à l'effacement (Oubli)</p>
+              <p className="text-xs text-red-600">Supprimez définitivement votre compte et toutes les données associées.</p>
+            </div>
+            <button 
+              onClick={handleDeleteAccount}
+              disabled={isDeleting}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash size={16} />}
+              Supprimer mon compte
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
+        <h4 className="text-sm font-bold text-blue-900 mb-2">Besoin d'aide sur la conformité ?</h4>
+        <p className="text-xs text-blue-700 mb-4">
+          Notre Délégué à la Protection des Données (DPO) est disponible pour répondre à vos questions concernant la sécurité de vos registres.
+        </p>
+        <a href="mailto:dpo@registre-securite.pro" className="text-xs font-bold text-blue-600 hover:underline">
+          Contacter le DPO →
+        </a>
       </div>
     </div>
   );
