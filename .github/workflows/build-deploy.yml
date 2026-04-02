@@ -1,0 +1,57 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Generate build artifacts
+        run: |
+          echo "Build completed at $(date)" > dist/BUILD_INFO.txt
+          echo "Commit: ${{ github.sha }}" >> dist/BUILD_INFO.txt
+          echo "Branch: ${{ github.ref }}" >> dist/BUILD_INFO.txt
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 30
+
+      - name: Check build size
+        run: |
+          du -sh dist/
+          find dist -type f -exec ls -lh {} \; | awk '{print $5, $9}' | sort -rh
+
+      - name: Deploy to Firebase (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
+          projectId: 'registre-securite'
+          channelId: 'live'

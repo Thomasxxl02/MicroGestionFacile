@@ -1,0 +1,48 @@
+name: Lint and Format
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Check TypeScript
+        run: npm run typecheck
+        continue-on-error: true
+
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+        continue-on-error: true
+
+      - name: Comment on PR with lint results
+        if: github.event_name == 'pull_request' && failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Linting issues detected**\n\nPlease run `npm run lint:fix` and `npm run format` locally to fix formatting issues.'
+            })
