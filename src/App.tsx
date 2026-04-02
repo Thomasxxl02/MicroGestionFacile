@@ -10,6 +10,7 @@ import {
   BookOpen, Accessibility, Megaphone, LogOut, Droplets, Droplet, ShieldPlus, FileText,
   Calendar, Camera
 } from 'lucide-react';
+import { ToastContainer } from './components/Toast';
 import SettingsView from './components/SettingsView';
 import DashboardView from './components/DashboardView';
 import InventoryView from './components/InventoryView';
@@ -233,6 +234,8 @@ export default function App() {
         companyId={userData?.companyId || ''}
         onFound={handleEquipmentFound}
       />
+
+      <ToastContainer />
     </div>
   );
 }

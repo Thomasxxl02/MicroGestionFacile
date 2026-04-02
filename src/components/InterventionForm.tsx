@@ -5,6 +5,7 @@ import 'jspdf-autotable';
 import { Save, FileText } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { toast } from './Toast';
 
 export default function InterventionForm({ companyId, establishmentId, equipmentId }: { companyId: string, establishmentId: string, equipmentId: string }) {
   const sigCanvas = useRef<SignatureCanvas>(null);
@@ -13,7 +14,10 @@ export default function InterventionForm({ companyId, establishmentId, equipment
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (!technician || !description) return;
+    if (!technician || !description) {
+      toast.warning('Veuillez remplir tous les champs requis.');
+      return;
+    }
     setSaving(true);
     try {
       const signatureData = sigCanvas.current?.toDataURL();
@@ -25,13 +29,13 @@ export default function InterventionForm({ companyId, establishmentId, equipment
         description,
         signatureData
       });
-      alert('Intervention enregistrée !');
+      toast.success('Intervention enregistrée avec succès !');
       setTechnician('');
       setDescription('');
       sigCanvas.current?.clear();
     } catch (error) {
       console.error('Error saving intervention:', error);
-      alert('Erreur lors de l\'enregistrement.');
+      toast.error('Erreur lors de l\'enregistrement.');
     } finally {
       setSaving(false);
     }

@@ -3,6 +3,8 @@ import { doc, getDoc, setDoc, collection, query, where, getDocs, deleteDoc, addD
 import { db, auth } from '../firebase';
 import { Save, Building2, Users, Plus, Trash2, Shield, Wrench, Eye, Database, Loader2, Lock, Download, Trash } from 'lucide-react';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
+import { toast } from './Toast';
+import { validation, validationMessages } from '../lib/validation';
 
 export default function SettingsView({ companyId }: { companyId: string }) {
   const [activeTab, setActiveTab] = useState<'company' | 'users' | 'gdpr'>('company');
@@ -70,14 +72,26 @@ function CompanySettings({ companyId }: { companyId: string }) {
   }, [companyId]);
 
   const handleSave = async () => {
+    // Validation du SIREN
+    if (companyData.siren && !validation.siren(companyData.siren)) {
+      toast.error(validationMessages.siren.invalid);
+      return;
+    }
+
+    // Validation de l'adresse
+    if (companyData.address && !validation.address(companyData.address)) {
+      toast.error(validationMessages.address.invalid);
+      return;
+    }
+
     setSaving(true);
     try {
       const docRef = doc(db, 'companies', companyId);
       await setDoc(docRef, { ...companyData, id: companyId }, { merge: true });
-      alert('Informations enregistrées avec succès.');
+      toast.success('Informations enregistrées avec succès.');
     } catch (error) {
       console.error("Error saving company data:", error);
-      alert('Erreur lors de l\'enregistrement. Vérifiez vos droits d\'accès (Admin requis).');
+      toast.error('Erreur lors de l\'enregistrement. Vérifiez vos droits d\'accès (Admin requis).');
     } finally {
       setSaving(false);
     }
@@ -334,10 +348,11 @@ function CompanySettings({ companyId }: { companyId: string }) {
 
       await setDoc(doc(db, `companies/${companyId}/accessibility`, "main"), accessibilityData);
 
-      alert('Données de démonstration générées avec succès !');
-      window.location.reload();
+      toast.success('Données de démonstration générées avec succès !');
+      setTimeout(() => window.location.reload(), 1500);
     } catch (error) {
       console.error("Error seeding data:", error);
+      toast.error('Erreur lors de la génération. Veuillez réessayer.');
       handleFirestoreError(error, OperationType.CREATE, `companies/${companyId}`, auth);
     } finally {
       setSeeding(false);
@@ -437,8 +452,30 @@ function UserManagement({ companyId }: { companyId: string }) {
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUser.name || !newUser.email) return;
-    
+    if (!newUser.name || !newUser.email) {
+      toast.warning('Veuillez remplir tous les champs requis.');
+      return;
+    }
+
+    // Validation du nom
+    if (!validation.name(newUser.name)) {
+      toast.error(validationMessages.name.invalid);
+      return;
+    }
+
+    // Validation de l'email
+    if (!validation.email(newUser.email)) {
+      toast.error(validationMessages.email.invalid);
+      return;
+    }
+
+    // Vérification des doublons email
+    const emailExists = users.some(u => u.email.toLowerCase() === newUser.email.toLowerCase());
+    if (emailExists) {
+      toast.error('Cet email est déjà utilisé par un autre utilisateur.');
+      return;
+    }
+
     try {
       const newUserRef = doc(collection(db, 'users'));
       await setDoc(newUserRef, {
@@ -446,11 +483,12 @@ function UserManagement({ companyId }: { companyId: string }) {
         companyId,
         id: newUserRef.id
       });
+      toast.success('Utilisateur ajouté avec succès.');
       setNewUser({ name: '', email: '', role: 'technician' });
       fetchUsers();
     } catch (error) {
       console.error("Error adding user:", error);
-      alert("Erreur lors de l'ajout de l'utilisateur (Admin requis).");
+      toast.error("Erreur lors de l'ajout de l'utilisateur (Admin requis).");
     }
   };
 
@@ -458,10 +496,11 @@ function UserManagement({ companyId }: { companyId: string }) {
     if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet utilisateur ?")) return;
     try {
       await deleteDoc(doc(db, 'users', userId));
+      toast.success('Utilisateur supprimé avec succès.');
       fetchUsers();
     } catch (error) {
       console.error("Error deleting user:", error);
-      alert("Erreur lors de la suppression.");
+      toast.error("Erreur lors de la suppression.");
     }
   };
 
@@ -583,7 +622,7 @@ function GDPRSettings({ companyId }: { companyId: string }) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleExportData = () => {
-    alert("L'exportation complète de vos données est en cours de préparation. Un lien de téléchargement vous sera envoyé par email.");
+    toast.info("L'exportation complète de vos données est en cours de préparation. Un lien de téléchargement vous sera envoyé par email.");
   };
 
   const handleDeleteAccount = async () => {
@@ -596,9 +635,10 @@ function GDPRSettings({ companyId }: { companyId: string }) {
     setIsDeleting(true);
     try {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      alert("Demande de suppression enregistrée. Votre compte sera clôturé sous 48h conformément au RGPD.");
+      toast.success("Demande de suppression enregistrée. Votre compte sera clôturé sous 48h conformément au RGPD.");
     } catch (error) {
       console.error("Error deleting account:", error);
+      toast.error("Erreur lors de la suppression du compte.");
     } finally {
       setIsDeleting(false);
     }

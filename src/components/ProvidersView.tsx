@@ -4,6 +4,8 @@ import { Briefcase, Award, AlertCircle, CheckCircle, Calendar, Phone, Mail, File
 import { collection, query, getDocs, doc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
+import { toast } from './Toast';
+import { validation, validationMessages } from '../lib/validation';
 
 export default function ProvidersView({ companyId }: { companyId: string }) {
   const [activeTab, setActiveTab] = useState<'providers' | 'certifications'>('providers');
@@ -53,13 +55,23 @@ export default function ProvidersView({ companyId }: { companyId: string }) {
     };
 
     try {
+      // Validation
+      if (!validation.email(newProvider.contact)) {
+        toast.error(validationMessages.email.invalid);
+        return;
+      }
+      if (!validation.phone(newProvider.phone)) {
+        toast.error(validationMessages.phone.invalid);
+        return;
+      }
       const newRef = doc(collection(db, `companies/${companyId}/providers`));
       await setDoc(newRef, newProvider);
+      toast.success('Prestataire ajouté avec succès.');
       setShowAddProviderModal(false);
       fetchData();
     } catch (error) {
       console.error("Error adding provider:", error);
-      alert("Erreur lors de l'ajout. Vérifiez vos droits.");
+      toast.error("Erreur lors de l'ajout. Vérifiez vos droits.");
     }
   };
 
@@ -79,11 +91,12 @@ export default function ProvidersView({ companyId }: { companyId: string }) {
     try {
       const newRef = doc(collection(db, `companies/${companyId}/certifications`));
       await setDoc(newRef, newCert);
+      toast.success('Certification ajoutée avec succès.');
       setShowAddCertModal(false);
       fetchData();
     } catch (error) {
       console.error("Error adding certification:", error);
-      alert("Erreur lors de l'ajout. Vérifiez vos droits.");
+      toast.error("Erreur lors de l'ajout. Vérifiez vos droits.");
     }
   };
 

@@ -10,6 +10,7 @@ import QrScanner from 'react-qr-scanner';
 import { collectionGroup, query, where, onSnapshot, Timestamp, doc, updateDoc, addDoc, collection, orderBy } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
+import { toast } from './Toast';
 import EquipmentDetailView from './EquipmentDetailView';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { logEvent } from '../lib/businessLogic';
@@ -246,7 +247,7 @@ export default function InventoryView({ category, companyId, initialEquipmentId 
       setSelectedEquipment(found);
       setScannedId('');
     } else {
-      alert("Équipement non trouvé");
+      toast.error("Équipement non trouvé");
     }
   };
 
@@ -882,7 +883,7 @@ export default function InventoryView({ category, companyId, initialEquipmentId 
                   try {
                     (newEquipment as any).customFields = JSON.parse(customFieldsStr);
                   } catch (e) {
-                    alert("Format JSON invalide pour les champs personnalisés.");
+                    toast.error("Format JSON invalide pour les champs personnalisés.");
                     setIsSubmitting(false);
                     return;
                   }

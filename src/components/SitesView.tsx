@@ -4,6 +4,7 @@ import { Building, MapPin, FileText, History, UploadCloud, Eye, ArrowLeft, Shiel
 import { collection, query, getDocs, doc, setDoc, serverTimestamp, deleteDoc, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { handleFirestoreError, OperationType } from '../lib/firebaseError';
+import { toast } from './Toast';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { isValidSiret, suggestERPCategory, logEvent, fetchCompanyInfo } from '../lib/businessLogic';
 
@@ -85,7 +86,7 @@ export default function SitesView({ companyId }: { companyId: string }) {
     
     // Validate SIRET only if it's 14 digits (SIREN is 9)
     if (formData.siret.length === 14 && !isValidSiret(formData.siret)) {
-      alert("Le numéro SIRET saisi est invalide (doit comporter 14 chiffres et respecter l'algorithme de Luhn).");
+      toast.error("Le numéro SIRET saisi est invalide (doit comporter 14 chiffres et respecter l'algorithme de Luhn).");
       return;
     }
 
